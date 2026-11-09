@@ -48,6 +48,21 @@ async function initializeDatabase() {
   console.log('Estrutura do PostgreSQL verificada.');
 }
 
+app.get('/', (req, res) => {
+  res.json({
+    service: 'Central de Notas Fiscais Costalog API',
+    status: 'running',
+    api: 'implemented',
+    endpoints: {
+      health: '/health',
+      invoices: '/api/invoices',
+      suppliers: '/api/suppliers',
+      products: '/api/products'
+    },
+    authentication: 'disabled'
+  });
+});
+
 app.get('/health', async (req, res) => {
   let databaseConnected = false;
   if (pool) {
