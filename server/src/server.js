@@ -3,6 +3,8 @@ const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
+const crypto = require('node:crypto');
+const sefaz = require('./sefaz');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -30,8 +32,18 @@ function requireDatabase(req, res, next) {
   next();
 }
 function cleanDocument(value) {
-  const result = String(value || '').replace(/\D/g, '');
+  const result = String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   return result || null;
+}
+function requireSefazSyncToken(req, res, next) {
+  const expected = process.env.COSTALOG_SYNC_TOKEN || '';
+  const auth = String(req.headers.authorization || '');
+  const received = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!expected) return res.status(503).json({ error: 'Agendador SEFAZ ainda não foi configurado.' });
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: 'Não autorizado.' });
+  next();
 }
 
 async function initializeDatabase() {
@@ -42,6 +54,12 @@ async function initializeDatabase() {
   await pool.query("CREATE TABLE IF NOT EXISTS suppliers (id BIGSERIAL PRIMARY KEY, identity_key TEXT NOT NULL UNIQUE, document TEXT, name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
   await pool.query("CREATE TABLE IF NOT EXISTS invoices (id BIGSERIAL PRIMARY KEY, access_key VARCHAR(44) UNIQUE, invoice_number TEXT, series TEXT, issue_date TIMESTAMPTZ, supplier_id BIGINT REFERENCES suppliers(id), supplier_name TEXT NOT NULL, supplier_document TEXT, recipient_document TEXT, total NUMERIC(15,2) NOT NULL DEFAULT 0, payment_info TEXT, protocol TEXT, status TEXT, file_name TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
   await pool.query("CREATE TABLE IF NOT EXISTS invoice_products (id BIGSERIAL PRIMARY KEY, invoice_id BIGINT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE, item_number INTEGER NOT NULL, product_code TEXT, description TEXT, ncm TEXT, cfop TEXT, unit TEXT, quantity NUMERIC(18,6) NOT NULL DEFAULT 0, unit_price NUMERIC(18,6) NOT NULL DEFAULT 0, total NUMERIC(15,2) NOT NULL DEFAULT 0)");
+  await pool.query("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'");
+  await pool.query("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sefaz_nsu VARCHAR(15)");
+  await pool.query("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sefaz_schema TEXT");
+  await pool.query("CREATE TABLE IF NOT EXISTS sefaz_sync_state (cnpj VARCHAR(14) PRIMARY KEY, ult_nsu VARCHAR(15) NOT NULL DEFAULT '000000000000000', max_nsu VARCHAR(15) NOT NULL DEFAULT '000000000000000', last_status TEXT, last_message TEXT, last_sync_at TIMESTAMPTZ, next_sync_at TIMESTAMPTZ, documents_processed INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+  await pool.query("CREATE TABLE IF NOT EXISTS sefaz_processed_documents (nsu VARCHAR(32) PRIMARY KEY, schema TEXT NOT NULL, access_key VARCHAR(44), document_type TEXT NOT NULL, processing_status TEXT NOT NULL, details JSONB NOT NULL DEFAULT '{}'::jsonb, received_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_sefaz_documents_access_key ON sefaz_processed_documents(access_key)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_invoices_issue_date ON invoices(issue_date DESC)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_invoices_supplier_document ON invoices(supplier_document)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_invoice_products_description ON invoice_products(description)");
@@ -57,8 +75,11 @@ app.get('/', (req, res) => {
       health: '/health',
       invoices: '/api/invoices',
       suppliers: '/api/suppliers',
-      products: '/api/products'
+      products: '/api/products',
+      sefazStatus: '/api/sefaz/status',
+      sefazSync: 'POST /api/sefaz/sync (token protegido)'
     },
+    sefazIntegration: 'Distribuição DF-e com sincronização protegida',
     authentication: 'disabled'
   });
 });
@@ -95,6 +116,23 @@ app.get('/api/products', requireDatabase, async (req, res, next) => {
     const result = await pool.query("SELECT p.*,i.invoice_number,i.supplier_name FROM invoice_products p JOIN invoices i ON i.id=p.invoice_id ORDER BY p.id DESC LIMIT 5000");
     res.json(result.rows);
   } catch (error) { next(error); }
+});
+
+app.get('/api/sefaz/status', requireDatabase, async (req, res, next) => {
+  try { res.json(await sefaz.getStatus(pool)); }
+  catch (error) { next(error); }
+});
+
+app.post('/api/sefaz/sync', requireDatabase, requireSefazSyncToken, async (req, res) => {
+  try {
+    if (!sefaz.getConfig().configured) {
+      return res.json({ skipped: true, reason: 'Aguardando novo certificado A1 e configuração segura no Render.' });
+    }
+    res.json(await sefaz.synchronize(pool));
+  } catch (error) {
+    console.error('Falha na sincronização SEFAZ:', error.message);
+    res.status(502).json({ error: error.message || 'Falha na sincronização com a SEFAZ.' });
+  }
 });
 
 app.post('/api/invoices', requireDatabase, async (req, res, next) => {
