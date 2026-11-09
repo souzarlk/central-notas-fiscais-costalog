@@ -7,11 +7,6 @@ const { Pool } = require('pg');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const DATABASE_URL = process.env.DATABASE_URL;
-const allowedOrigins = new Set([
-  'https://souzarlk.github.io',
-  'http://localhost:5500',
-  'http://127.0.0.1:5500'
-]);
 const pool = DATABASE_URL ? new Pool({
   connectionString: DATABASE_URL,
   max: 5,
@@ -21,12 +16,7 @@ const pool = DATABASE_URL ? new Pool({
 
 app.set('trust proxy', 1);
 app.use(helmet());
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) return callback(null, true);
-    return callback(new Error('Origem não autorizada pelo CORS.'));
-  }
-}));
+app.use(cors()); // API pública nesta etapa, sem restrição de origem.
 app.use(express.json({ limit: '1mb' }));
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
