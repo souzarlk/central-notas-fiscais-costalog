@@ -2,27 +2,25 @@
 
 Primeira versão da interface administrativa para organizar NF-e recebidas pela Costalog.
 
-## O que existe nesta versão
-
-- Dashboard com indicadores calculados a partir dos XMLs importados.
+## Funcionalidades do frontend
+- Dashboard com indicadores calculados a partir das notas.
 - Importação de múltiplos XMLs de NF-e (NFe / procNFe).
 - Leitura local de emitente, destinatário, número, série, emissão, chave, total, formas de pagamento e itens.
 - Listagem, filtros, produtos e agrupamento de fornecedores.
 - Layout responsivo com identidade visual vermelha e branca.
+- Quando a API estiver ativa, a interface carrega as notas do banco e grava novas importações.
 
-## Limitações importantes
+## Backend preparado
+- API Node.js / Express em `server/`.
+- PostgreSQL via Neon, com tabelas de notas, fornecedores e produtos.
+- Rotas de consulta e importação.
+- Inicialização automática do schema.
+- Deploy preparado pelo `render.yaml` (Render Blueprint).
 
-Esta é uma **versão inicial de demonstração**. O processamento ocorre no navegador e os dados ficam somente na memória da sessão. Ao atualizar ou fechar a página, os dados importados são perdidos.
+## Limitações e segurança
+O acesso permanece **aberto e sem login**, conforme solicitado nesta etapa. A API é pública: CORS não substitui autenticação. Não use XMLs reais nem dados fiscais confidenciais até implementar controle de acesso. O XML original não é guardado pelo backend; apenas campos estruturados e produtos extraídos são persistidos.
 
-Ainda não existe:
-- autenticação administrativa real;
-- banco de dados;
-- backend;
-- consulta automática à SEFAZ / Distribuição DF-e;
-- armazenamento de XMLs ou DANFEs;
-- manifestação do destinatário.
-
-**Não use XMLs reais ou dados fiscais confidenciais enquanto este repositório estiver público e a aplicação não tiver backend e controle de acesso.** Não coloque certificados, senhas, tokens ou chaves em arquivos do GitHub.
+Antes da configuração do Neon e do Render, a interface funciona em modo local e os dados importados permanecem somente na memória da sessão.
 
 ## Publicação pelo GitHub Actions
 
@@ -45,3 +43,14 @@ O certificado digital deverá ficar exclusivamente no ambiente seguro do backend
 3. Criar banco privado e autenticação.
 4. Implementar upload seguro e persistência.
 5. Implementar integração fiscal após disponibilização do certificado e-CNPJ.
+
+
+## Configuração Render + Neon
+1. Crie um projeto PostgreSQL no Neon.
+2. No Neon, clique em **Connect**, selecione branch, database e role, e copie a connection string mantendo `sslmode=require` e `channel_binding=require` quando disponíveis.
+3. No Render, crie um Blueprint a partir deste repositório e selecione `render.yaml`.
+4. Ao criar o serviço, informe a variável secreta `DATABASE_URL` com a connection string do Neon. Não a grave no GitHub.
+5. A URL prevista da API será `https://central-notas-fiscais-costalog-api.onrender.com`. Confira a URL real no painel do Render; se for diferente, atualize `API_BASE_URL` no `index.html`.
+6. Acesse `/health` na URL da API. O campo `databaseConnected` deverá retornar `true`.
+
+O Render executa o serviço a partir de `server/`, definida em `render.yaml`. O plano Free pode apresentar inicialização mais lenta após períodos sem uso.
