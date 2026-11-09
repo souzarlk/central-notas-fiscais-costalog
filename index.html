@@ -88,7 +88,7 @@ async function refreshSefazStatus(){
   $('sefazDocs').textContent=Number(status.processedDocuments||0).toLocaleString('pt-BR');
   $('sefazNote').textContent=status.configured
     ?'Último retorno da SEFAZ: '+(status.lastStatus||'sem consulta')+'. O agendamento respeita o intervalo mínimo de uma hora quando não há documentos novos.'
-    :'O certificado anterior foi removido do repositório após exposição. Instale um novo certificado A1 revogado/substituído como Secret File no Render antes de ativar a consulta.';
+    :'O certificado anterior foi removido da versão atual do repositório após exposição. Revogue-o e configure um novo PFX como Base64 e sua senha somente nas variáveis privadas do Render antes de ativar a consulta.';
   return status;
 }
 
