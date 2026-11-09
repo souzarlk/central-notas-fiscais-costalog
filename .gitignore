@@ -1,0 +1,9 @@
+*.pfx
+*.p12
+*.pfx.*
+*.p12.*
+.env
+.env.*
+!.env.example
+/certificados/
+/certificates/
