@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const zlib = require('node:zlib');
-const { buildRequest, parseResponse, parseInvoice, decompress } = require('../src/sefaz');
+const { getConfig, buildRequest, parseResponse, parseInvoice, decompress } = require('../src/sefaz');
 
 test('buildRequest cria consulta distNSU com NSU de 15 dígitos', () => {
   const xml = buildRequest({
@@ -37,4 +37,27 @@ test('decompress restaura XML GZip enviado no docZip', () => {
   const source = '<resNFe><xNome>Teste</xNome></resNFe>';
   const compressed = zlib.gzipSync(Buffer.from(source)).toString('base64');
   assert.equal(decompress(compressed), source);
+});
+
+test('getConfig accepts a PFX Base64 stored as a server secret', () => {
+  const original = {};
+  const keys = ['SEFAZ_ENABLED','SEFAZ_CERT_BASE64','SEFAZ_CERT_PASSWORD','SEFAZ_CNPJ','SEFAZ_TP_AMB','SEFAZ_CERT_PATH'];
+  for (const key of keys) original[key] = process.env[key];
+  process.env.SEFAZ_ENABLED = 'true';
+  process.env.SEFAZ_CERT_BASE64 = 'c29tZS1iYXNlNjQ=';
+  process.env.SEFAZ_CERT_PASSWORD = 'test-only';
+  process.env.SEFAZ_CNPJ = '13824759000130';
+  process.env.SEFAZ_TP_AMB = '1';
+  delete process.env.SEFAZ_CERT_PATH;
+  try {
+    const config = getConfig();
+    assert.equal(config.certificateBase64Configured, true);
+    assert.equal(config.certificateConfigured, true);
+    assert.equal(config.configured, true);
+  } finally {
+    for (const key of keys) {
+      if (original[key] === undefined) delete process.env[key];
+      else process.env[key] = original[key];
+    }
+  }
 });
