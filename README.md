@@ -31,7 +31,7 @@ O workflow em .github/workflows/pages.yml publica o conteúdo do repositório no
 - Frontend: GitHub Pages.
 - Backend: Node.js (serviço separado).
 - Banco: PostgreSQL gerenciado.
-- Autenticação: sessão segura no backend, perfis Administrador/T.I.
+- Acesso nesta fase: aberto, sem login; autenticação será adicionada quando solicitada.
 - Integração fiscal: Distribuição DF-e, certificado e-CNPJ ICP-Brasil, controle de NSU e tratamento de manifestação do destinatário conforme regras fiscais.
 
 O certificado digital deverá ficar exclusivamente no ambiente seguro do backend, nunca no navegador ou no repositório.
@@ -40,9 +40,10 @@ O certificado digital deverá ficar exclusivamente no ambiente seguro do backend
 
 1. Validar a leitura com XMLs de teste sem dados pessoais reais.
 2. Definir domínio/URL e provedor do backend.
-3. Criar banco privado e autenticação.
-4. Implementar upload seguro e persistência.
-5. Implementar integração fiscal após disponibilização do certificado e-CNPJ.
+3. Conectar Neon e Render e validar a persistência.
+4. Testar importação, duplicidade e consultas.
+5. Implementar autenticação e controles de acesso quando a empresa decidir restringir o sistema.
+6. Implementar integração fiscal após disponibilização do certificado e-CNPJ.
 
 
 ## Configuração Render + Neon
