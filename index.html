@@ -67,7 +67,9 @@ function navigate(page){document.querySelectorAll('.page').forEach(p=>p.classLis
 document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.goto)));$('menuBtn').addEventListener('click',()=>$('sidebar').classList.toggle('open'));$('xmlFiles').addEventListener('change',e=>importFiles(e.target.files));$('drop').addEventListener('click',e=>{if(e.target.tagName!=='INPUT')$('xmlFiles').click()});['dragenter','dragover'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();$('drop').classList.add('drag')}));['dragleave','drop'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();$('drop').classList.remove('drag')}));$('drop').addEventListener('drop',e=>importFiles(e.dataTransfer.files));$('invoiceSearch').addEventListener('input',render);$('dateFilter').addEventListener('change',render);$('productSearch').addEventListener('input',render);document.addEventListener('click',e=>{const b=e.target.closest('[data-detail]');if(!b)return;const n=state.invoices.find(x=>String(x.id??x.key)===b.dataset.detail);if(n)showDetail(n)});function showDetail(n){const rows=n.products.map(p=>'<tr><td>'+esc(p.code)+'</td><td>'+esc(p.description)+'</td><td>'+p.quantity.toLocaleString('pt-BR')+' '+esc(p.unit)+'</td><td>'+money(p.unitPrice)+'</td><td>'+money(p.total)+'</td></tr>').join('');const w=window.open('','_blank','width=900,height=750');if(!w){toast('Permita pop-ups para abrir os detalhes');return}w.document.write('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>NF '+esc(n.number)+'</title><body style="font:14px Arial;padding:28px;color:#252a31"><h2 style="color:#a71920">Detalhes da NF-e '+esc(n.number)+'</h2><p><b>Fornecedor:</b> '+esc(n.supplier)+' · '+esc(n.supplierCnpj)+'</p><p><b>Destinatário CNPJ:</b> '+esc(n.destCnpj)+'</p><p><b>Emissão:</b> '+esc(formatDate(n.date))+' · <b>Série:</b> '+esc(n.series)+'</p><p><b>Chave:</b> '+esc(n.key)+'</p><p><b>Pagamento informado:</b> '+esc(n.payment)+'</p><h3>Produtos</h3><table width="100%" border="1" cellspacing="0" cellpadding="8"><tr><th>Código</th><th>Descrição</th><th>Quantidade</th><th>Unitário</th><th>Total</th></tr>'+rows+'</table><h2>Total: '+money(n.total)+'</h2><p style="color:#777">Dados extraídos do XML · Central de Notas Fiscais Costalog</p></body></html>');w.document.close()}
 
 async function apiRequest(path,options={}){
-const response=await fetch(API_BASE_URL+path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+const headers={...(options.headers||{})};
+if(options.body&&!headers['Content-Type']&&!headers['content-type'])headers['Content-Type']='application/json';
+const response=await fetch(API_BASE_URL+path,{...options,mode:'cors',credentials:'omit',headers});
 const payload=await response.json().catch(()=>({}));
 if(!response.ok)throw new Error(payload.error||('Falha na API ('+response.status+')'));
 return payload;
@@ -85,6 +87,8 @@ $('apiStatus').className='pill green';
 apiOnline=false;
 $('apiStatus').textContent='Modo local';
 $('apiStatus').className='pill';
+$('apiStatus').title='Falha ao conectar à API: '+(error?.message||'erro desconhecido')+'. Verifique o Render, /health e o CORS.';
+console.error('Central Costalog: falha na conexão com a API.',error);
 }
 render();
 }
