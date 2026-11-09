@@ -20,16 +20,16 @@ A aplicação não envia manifestação do destinatário automaticamente. Antes 
 
 ## Configuração segura no Render
 1. Revogue o certificado anterior que foi exposto e obtenha um NOVO certificado A1.
-2. No Render → serviço da API → Environment → Secret Files, adicione o novo arquivo, por exemplo costalog-certificado.pfx. O caminho padrão será /etc/secrets/costalog-certificado.pfx.
-3. Configure SEFAZ_CERT_PATH com o caminho real do Secret File.
-4. Configure SEFAZ_CERT_PASSWORD somente em Environment do Render.
-5. Configure SEFAZ_CNPJ com o CNPJ completo da empresa, sem pontuação.
-6. Configure SEFAZ_CUFAUTOR=35, SEFAZ_TP_AMB=1 e SEFAZ_DISTRIBUTION_URL com o endpoint oficial.
-7. Gere um token longo e aleatório e cadastre o mesmo valor como COSTALOG_SYNC_TOKEN no Render e em GitHub → Settings → Secrets and variables → Actions.
-8. Confirme que o endpoint /api/sefaz/status mostra certificado e token configurados. Só então altere SEFAZ_ENABLED=true e faça o deploy.
+2. No computador da empresa, codifique o novo PFX em Base64 com PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\\caminho\\novo-certificado.pfx'))`.
+3. Copie a saída diretamente para Render → serviço da API → Environment como `SEFAZ_CERT_BASE64`. Não envie esse conteúdo ao ChatGPT nem ao GitHub.
+4. Configure `SEFAZ_CERT_PASSWORD` somente em Environment do Render.
+5. Configure `SEFAZ_CNPJ` com o CNPJ completo da empresa, sem pontuação.
+6. Configure `SEFAZ_CUFAUTOR=35`, `SEFAZ_TP_AMB=1` e `SEFAZ_DISTRIBUTION_URL` com o endpoint oficial.
+7. Gere um token longo e aleatório e cadastre o mesmo valor como `COSTALOG_SYNC_TOKEN` no Render e em GitHub → Settings → Secrets and variables → Actions.
+8. Confirme que `/api/sefaz/status` mostra certificado e token configurados. Só então altere `SEFAZ_ENABLED=true` e faça o deploy.
 9. Execute o workflow manualmente em GitHub → Actions → Sincronização automática de NF-e da Costalog.
 
-Nunca grave certificado, senha, connection string ou token no GitHub, no frontend, em arquivos versionados ou logs.
+Nunca grave o arquivo PFX, o Base64, a senha, a connection string ou o token no GitHub, no frontend, em arquivos versionados ou logs.
 
 ## Regras e limites
 - A distribuição é por NSU do interessado; a primeira consulta não garante histórico completo anterior à ativação.
