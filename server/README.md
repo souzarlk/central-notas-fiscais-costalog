@@ -20,7 +20,7 @@ A aplicação não envia manifestação do destinatário automaticamente. Antes 
 
 ## Configuração segura no Render
 1. Revogue o certificado anterior que foi exposto e obtenha um NOVO certificado A1.
-2. No computador da empresa, codifique o novo PFX em Base64 com PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\\caminho\\novo-certificado.pfx'))`.
+2. No computador da empresa, codifique o novo PFX em Base64 com PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes('C:\caminho\novo-certificado.pfx'))`.
 3. Copie a saída diretamente para Render → serviço da API → Environment como `SEFAZ_CERT_BASE64`. Não envie esse conteúdo ao ChatGPT nem ao GitHub.
 4. Configure `SEFAZ_CERT_PASSWORD` somente em Environment do Render.
 5. Configure `SEFAZ_CNPJ` com o CNPJ completo da empresa, sem pontuação.
