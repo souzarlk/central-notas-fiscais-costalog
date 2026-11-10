@@ -174,14 +174,14 @@ if(!inf&&!summary)throw Error('Arquivo não contém uma NF-e reconhecida.');
 if(!inf&&summary){
  const key=get(summary,'chNFe');
  if(!/^\d{44}$/.test(key))throw Error('Resumo de NF-e sem chave de acesso válida.');
- return{id:'local-'+Date.now()+'-'+Math.random().toString(16).slice(2),key,number:key.slice(25,34).replace(/^0+/,'')||'—',series:key.slice(22,25).replace(/^0+/,'')||'—',date:get(summary,'dhEmi'),supplier:get(summary,'xNome')||'Fornecedor não identificado',supplierCnpj:get(summary,'CNPJ')||get(summary,'CPF'),destCnpj:'',total:Number(get(summary,'vNF')||0),products:[],payment:'Não disponível no resumo SEFAZ',fileName,protocol:get(summary,'nProt'),status:'Resumo SEFAZ — manifestação pendente'};
+ return{id:'local-'+Date.now()+'-'+Math.random().toString(16).slice(2),key,number:key.slice(25,34).replace(/^0+/,'')||'—',series:key.slice(22,25).replace(/^0+/,'')||'—',date:get(summary,'dhEmi'),supplier:get(summary,'xNome')||'Fornecedor não identificado',supplierCnpj:get(summary,'CNPJ')||get(summary,'CPF'),destCnpj:'',total:Number(get(summary,'vNF')||0),products:[],payment:'Não disponível no resumo SEFAZ',fileName,protocol:get(summary,'nProt'),status:'Resumo SEFAZ — manifestação pendente',rawXml:xml};
 }
 const ide=inf.getElementsByTagName('ide')[0],emit=inf.getElementsByTagName('emit')[0],dest=inf.getElementsByTagName('dest')[0],total=inf.getElementsByTagName('ICMSTot')[0];
 const products=all(inf,'det').map(d=>{const p=d.getElementsByTagName('prod')[0];return{code:get(p,'cProd'),description:get(p,'xProd'),ncm:get(p,'NCM'),cfop:get(p,'CFOP'),unit:get(p,'uCom'),quantity:Number(get(p,'qCom')||0),unitPrice:Number(get(p,'vUnCom')||0),total:Number(get(p,'vProd')||0)}});
 const pays=all(inf,'detPag').map(p=>{const t=get(p,'tPag');const names={'01':'Dinheiro','02':'Cheque','03':'Cartão de crédito','04':'Cartão de débito','05':'Crédito loja','10':'Vale alimentação','11':'Vale refeição','12':'Vale presente','13':'Vale combustível','15':'Boleto bancário','16':'Depósito bancário','17':'PIX','18':'Transferência','19':'Fidelidade','90':'Sem pagamento','99':'Outros'};return (names[t]||('Código '+t))+' — '+money(get(p,'vPag'))});
 const key=(inf.getAttribute('Id')||'').replace(/^NFe/,'');
 if(!/^\d{44}$/.test(key))throw Error('NF-e sem chave de acesso válida de 44 dígitos.');
-return{id:'local-'+Date.now()+'-'+Math.random().toString(16).slice(2),key,number:get(ide,'nNF'),series:get(ide,'serie'),date:get(ide,'dhEmi')||get(ide,'dEmi'),supplier:get(emit,'xNome')||'Fornecedor não identificado',supplierCnpj:get(emit,'CNPJ')||get(emit,'CPF'),destCnpj:get(dest,'CNPJ')||get(dest,'CPF'),total:Number(get(total,'vNF')||0),products,payment:pays.join('; ')||'Não informado no XML',fileName,protocol:get(doc,'nProt'),status:get(doc,'cStat')==='100'?'Autorizada':'Importada'};
+return{id:'local-'+Date.now()+'-'+Math.random().toString(16).slice(2),key,number:get(ide,'nNF'),series:get(ide,'serie'),date:get(ide,'dhEmi')||get(ide,'dEmi'),supplier:get(emit,'xNome')||'Fornecedor não identificado',supplierCnpj:get(emit,'CNPJ')||get(emit,'CPF'),destCnpj:get(dest,'CNPJ')||get(dest,'CPF'),total:Number(get(total,'vNF')||0),products,payment:pays.join('; ')||'Não informado no XML',fileName,protocol:get(doc,'nProt'),status:get(doc,'cStat')==='100'?'Autorizada':'Importada',rawXml:xml};
 }
 
 function parseFiscalXml(xml,fileName){
@@ -333,7 +333,7 @@ async function importFiles(files){
       return;
     }
     const invoiceChunks=[];
-    for(let start=0;start<parsed.length;start+=50)invoiceChunks.push(parsed.slice(start,start+50));
+    for(let start=0;start<parsed.length;start+=1)invoiceChunks.push(parsed.slice(start,start+1));
     for(let index=0;index<invoiceChunks.length;index++){
       const result=await apiRequest('/api/invoices/import-batch',{method:'POST',body:JSON.stringify({invoices:invoiceChunks[index]})});
       imported+=Number(result.imported||0);
@@ -703,7 +703,7 @@ function wDocTable(rows,isInvoice){
   const docNo=row.number||'—',name=isInvoice?row.supplier:row.issuer,doc=isInvoice?row.supplierCnpj:row.issuer_document;
   const date=row.date,total=row.total,status=row.status||'Importado';
   const entityType=isInvoice?'invoice':'fiscal_document';
-  const action=isInvoice?'<button class="btn" data-detail="'+esc(id??row.key)+'">Detalhes</button>':'<button class="btn" data-download-doc="'+esc(id)+'">Baixar XML</button>';
+  const action=isInvoice?'<button class="btn" data-detail="'+esc(id??row.key)+'">Detalhes</button>'+(row.hasRawXml?'<button class="btn" data-download-invoice-xml="'+esc(id)+'">XML</button>':'<span class="feature-status">XML não armazenado</span>'):'<button class="btn" data-download-doc="'+esc(id)+'">Baixar XML</button>';
   return '<tr><td><strong>'+esc(docNo)+'</strong><span class="secondary">'+esc(row.series||'')+'</span></td><td><strong>'+esc(name||'—')+'</strong><span class="secondary">'+esc(doc||'')+'</span></td><td>'+esc(formatDate(date))+'</td><td>'+money(total)+'</td><td>'+wStatus(status)+'</td><td>'+esc(row.source||'XML/ZIP')+'</td><td><div class="feature-actions">'+action+'<button type="button" data-doc-note="comment" data-entity-type="'+entityType+'" data-entity-id="'+esc(id)+'">Comentar</button><button type="button" data-doc-note="tag" data-entity-type="'+entityType+'" data-entity-id="'+esc(id)+'">Etiquetar</button><button type="button" data-doc-notes-view data-entity-type="'+entityType+'" data-entity-id="'+esc(id)+'">Ver notas</button></div></td></tr>';
  }).join('');
  return '<div class="feature-table-wrap"><table class="feature-table"><thead><tr><th>Número / Série</th><th>Emitente</th><th>Emissão</th><th>Valor</th><th>Situação</th><th>Origem</th><th></th></tr></thead><tbody>'+html+'</tbody></table></div>';
@@ -847,6 +847,12 @@ async function exportCsvFile(filename,headers,rows){
  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
  const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
 }
+async function downloadInvoiceXml(id){
+ const response=await fetch(API_BASE_URL+'/api/invoices/'+encodeURIComponent(id)+'/xml',{headers:{Authorization:'Bearer '+authToken},credentials:'omit'});
+ if(!response.ok){const body=await response.json().catch(()=>({}));throw Error(body.error||'Não foi possível baixar o XML da NF-e.');}
+ const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download='NFe-'+id+'.xml';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
 async function downloadFiscalXml(id){
  const response=await fetch(API_BASE_URL+'/api/fiscal-documents/'+encodeURIComponent(id)+'/xml',{headers:{Authorization:'Bearer '+authToken},credentials:'omit'});
  if(!response.ok)throw Error('Não foi possível baixar o XML.');
@@ -873,7 +879,7 @@ async function uploadWorkspaceCapture(){
    catch(e){errors.push(item.name+': '+e.message);}
   }
   let imported=0,duplicates=0,invalid=0;
-  for(let i=0;i<invoices.length;i+=50){const r=await apiRequest('/api/invoices/import-batch',{method:'POST',body:JSON.stringify({invoices:invoices.slice(i,i+50)})});imported+=Number(r.imported||0);duplicates+=Number(r.duplicates||0);invalid+=Number(r.invalid||0);}
+  for(let i=0;i<invoices.length;i+=1){const r=await apiRequest('/api/invoices/import-batch',{method:'POST',body:JSON.stringify({invoices:invoices.slice(i,i+1)})});imported+=Number(r.imported||0);duplicates+=Number(r.duplicates||0);invalid+=Number(r.invalid||0);}
   for(let i=0;i<documents.length;i+=2){const r=await apiRequest('/api/fiscal-documents/import-batch',{method:'POST',body:JSON.stringify({documents:documents.slice(i,i+2)})});imported+=Number(r.imported||0);duplicates+=Number(r.duplicates||0);invalid+=Number(r.invalid||0);}
   state.invoices=await apiRequest('/api/invoices');state.documents=await apiRequest('/api/fiscal-documents');workspaceState.documents=state.documents;workspaceState.documentsLoaded=true;clearWorkspaceCaches();render();
   feedback.textContent=xmlFiles.length+' XML(s) analisado(s): '+imported+' gravado(s), '+duplicates+' duplicado(s), '+invalid+' inválido(s). '+errors.slice(0,6).join(' | ');
@@ -889,6 +895,7 @@ function initWorkspaceUI(){
   const type=event.target.closest('[data-doc-type]');if(type){workspaceState.docType=type.dataset.docType;workspaceState.docSearch='';renderWorkspaceFeature();return;}
   const notesView=event.target.closest('[data-doc-notes-view]');if(notesView){try{const url='/api/annotations?entityType='+encodeURIComponent(notesView.dataset.entityType)+'&entityId='+encodeURIComponent(notesView.dataset.entityId);const notes=await apiRequest(url);window.alert(notes.length?notes.map(item=>'['+item.kind+'] '+item.body+' — '+(item.created_by||'')).join('\n\n'):'Nenhum comentário ou etiqueta registrado.');}catch(error){toast(error.message);}return;}
   const note=event.target.closest('[data-doc-note]');if(note){const body=window.prompt(note.dataset.docNote==='tag'?'Digite a etiqueta para este documento:':'Escreva uma observação para este documento:');if(!body||!body.trim())return;try{await apiRequest('/api/annotations',{method:'POST',body:JSON.stringify({entityType:note.dataset.entityType,entityId:Number(note.dataset.entityId),kind:note.dataset.docNote,body:body.trim()})});toast(note.dataset.docNote==='tag'?'Etiqueta adicionada ao documento':'Comentário adicionado ao documento');}catch(error){toast(error.message);}return;}
+  const invoiceXml=event.target.closest('[data-download-invoice-xml]');if(invoiceXml){try{await downloadInvoiceXml(invoiceXml.dataset.downloadInvoiceXml);}catch(error){toast(error.message);}return;}
   const download=event.target.closest('[data-download-doc]');if(download){try{await downloadFiscalXml(download.dataset.downloadDoc);}catch(error){toast(error.message);}return;}
   const statusButton=event.target.closest('button[data-record-status]');if(statusButton){try{await apiRequest('/api/workspace/records/'+statusButton.dataset.recordStatus,{method:'PATCH',body:JSON.stringify({status:statusButton.dataset.nextStatus||'Ativa'})});clearWorkspaceCaches();await renderWorkspaceFeature();toast('Status da regra atualizado');}catch(error){toast(error.message);}return;}
   const del=event.target.closest('[data-record-delete]');if(del){if(!confirm('Excluir este registro da Central?'))return;try{await apiRequest('/api/workspace/records/'+del.dataset.recordDelete,{method:'DELETE'});clearWorkspaceCaches();await renderWorkspaceFeature();toast('Registro excluído');}catch(error){toast(error.message);}return;}
