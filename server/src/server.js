@@ -156,7 +156,7 @@ app.get('/api/invoices/export.csv', requireDatabase, requireAdminAuth, async (re
 
 app.get('/api/invoices', requireDatabase, requireAdminAuth, async (req, res, next) => {
   try {
-    const result = await pool.query("SELECT i.id, COALESCE(i.access_key, 'Não informada') AS key, i.access_key AS \"accessKey\", i.invoice_number AS number, i.series, i.issue_date AS date, i.supplier_name AS supplier, i.supplier_document AS \"supplierCnpj\", i.recipient_document AS \"destCnpj\", i.total, i.payment_info AS payment, i.protocol, i.status, i.file_name AS \"fileName\", COALESCE((SELECT json_agg(json_build_object('code',p.product_code,'description',p.description,'ncm',p.ncm,'cfop',p.cfop,'unit',p.unit,'quantity',p.quantity,'unitPrice',p.unit_price,'total',p.total) ORDER BY p.item_number) FROM invoice_products p WHERE p.invoice_id=i.id), '[]'::json) AS products FROM invoices i ORDER BY i.issue_date DESC NULLS LAST, i.id DESC LIMIT 1000");
+    const result = await pool.query("SELECT i.id, COALESCE(i.access_key, 'Não informada') AS key, i.access_key AS \"accessKey\", i.invoice_number AS number, i.series, i.issue_date AS date, i.supplier_name AS supplier, i.supplier_document AS \"supplierCnpj\", i.recipient_document AS \"destCnpj\", i.total, i.payment_info AS payment, i.protocol, i.status, i.source, i.file_name AS \"fileName\", COALESCE((SELECT json_agg(json_build_object('code',p.product_code,'description',p.description,'ncm',p.ncm,'cfop',p.cfop,'unit',p.unit,'quantity',p.quantity,'unitPrice',p.unit_price,'total',p.total) ORDER BY p.item_number) FROM invoice_products p WHERE p.invoice_id=i.id), '[]'::json) AS products FROM invoices i ORDER BY i.issue_date DESC NULLS LAST, i.id DESC LIMIT 1000");
     res.json(result.rows);
   } catch (error) { next(error); }
 });
@@ -246,6 +246,7 @@ app.post('/api/invoices/import-batch', requireDatabase, requireAdminAuth, async 
         );
         if (!inserted.rows.length) {
           await client.query('ROLLBACK TO SAVEPOINT invoice_import_item');
+          await client.query('RELEASE SAVEPOINT invoice_import_item');
           summary.duplicates++;
           continue;
         }
@@ -261,6 +262,7 @@ app.post('/api/invoices/import-batch', requireDatabase, requireAdminAuth, async 
         await client.query('RELEASE SAVEPOINT invoice_import_item');
       } catch (itemError) {
         await client.query('ROLLBACK TO SAVEPOINT invoice_import_item');
+        await client.query('RELEASE SAVEPOINT invoice_import_item');
         summary.invalid++;
         summary.errors.push({ fileName: String(data.fileName || 'Arquivo ' + (index+1)), reason: 'Falha ao gravar esta NF-e.' });
       }
