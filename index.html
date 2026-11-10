@@ -488,6 +488,8 @@ const health=await apiRequest('/health');
 if(!health.databaseConnected)throw new Error('Banco ainda não conectado');
 const saved=await apiRequest('/api/invoices');
 state.invoices=Array.isArray(saved)?saved:[];
+state.documents=await apiRequest('/api/fiscal-documents').catch(()=>[]);
+workspaceState.documents=state.documents;workspaceState.documentsLoaded=true;
 apiOnline=true;
 await refreshSefazStatus().catch(error=>console.warn('Status SEFAZ indisponível:',error));
 $('apiStatus').textContent='Banco conectado';
@@ -566,5 +568,325 @@ async function bootstrapAuth(){
     showLogin('Sua sessão não está mais válida. Entre novamente.');
   }
 }
+
+const workspaceState={area:'geral',feature:'home',records:[],documents:[],docType:'NFE',docSearch:''};
+const workspaceConfig={
+  geral:{label:'Geral',items:[
+    ['home','Painel da conta','◫'],['documents','Documentos','▤'],['payments','Gestão de pagamentos','R
+</script></body></html>],['payables','Contas a pagar','↗'],['bills','Boletos com notas','▧'],['suppliers','Fornecedores','♙'],['automations','Automações','⚡'],['reports','Relatórios','▥'],['month-close','Fechamento mensal','▣'],['capture','Captura e envio','⇧'],['library','Biblioteca digital','▤']
+  ]},
+  compras:{label:'Compras',items:[
+    ['home','Painel de compras','◫'],['orders','Pedidos e contratos','▤'],['matching','Conferência pedido × NF','✓'],['negotiations','Negociações pendentes','↔'],['suppliers','Fornecedores','♙'],['reports','Análises de compras','▥']
+  ]},
+  fiscal:{label:'Fiscal',items:[
+    ['home','Painel fiscal','◫'],['documents','Documentos fiscais','▤'],['doc-nfe-stages','NF-e em etapas','▥'],['doc-nfe','NF-e','▤'],['doc-nfse','NFS-e','▤'],['doc-cte','CT-e','▤'],['doc-cfe','CF-e SAT','▤'],['doc-nfce','NFC-e','▤'],['doc-mdfe','MDF-e','▤'],['reports','Relatórios avançados','▥'],['tax-analysis','Análise Tax','◇'],['sped','Análise SPED','▦'],['key-check','Confere chaves','⌕'],['manifestations','Manifestações','⚑'],['returns','Devoluções de NF-e','↶']
+  ]}
+};
+const workspaceTitleMap={home:'Painel da conta',documents:'Documentos fiscais',payments:'Gestão de pagamentos',payables:'Contas a pagar',bills:'Boletos com notas',suppliers:'Gestão de fornecedores',automations:'Automações',reports:'Relatórios e inteligência', 'month-close':'Fechamento mensal',capture:'Captura e envio',library:'Biblioteca digital',orders:'Pedidos e contratos',matching:'Conferência pedido × nota',negotiations:'Negociações pendentes','doc-nfe-stages':'NF-e em etapas','doc-nfe':'NF-e','doc-nfse':'NFS-e','doc-cte':'CT-e','doc-cfe':'CF-e SAT','doc-nfce':'NFC-e','doc-mdfe':'MDF-e','tax-analysis':'Análise Tax',sped:'Análise SPED','key-check':'Confere chaves',manifestations:'Manifestações',returns:'Devoluções de NF-e'};
+const workspaceDescMap={
+  home:'Visão integrada da operação fiscal, financeira e de compras.',
+  documents:'Consulte, filtre, organize e exporte documentos fiscais armazenados na Central.',
+  payments:'Acompanhe obrigações, boletos, aprovações e comprovantes em um fluxo rastreável.',
+  payables:'Registre contas, revise dados e acompanhe o fluxo interno de aprovação e liquidação.',
+  bills:'Associe boletos aos documentos fiscais e acompanhe vencimentos e divergências.',
+  suppliers:'Visão consolidada dos fornecedores presentes nos documentos e processos da Costalog.',
+  automations:'Cadastre regras de trabalho para padronizar rotinas e preparar integrações.',
+  reports:'Monte análises com os documentos já armazenados na Central.',
+  'month-close':'Consolide os registros fiscais por período para conferência e compartilhamento.',
+  capture:'Importe XMLs individuais ou ZIPs de documentos fiscais.',
+  library:'Acesse os XMLs fiscais originais importados e seus registros.',
+  orders:'Registre pedidos e contratos de compra e acompanhe seu recebimento.',
+  matching:'Compare pedidos cadastrados com notas fiscais importadas antes de encaminhar ao financeiro.',
+  negotiations:'Acompanhe pendências, prazos e tratativas com fornecedores.',
+  'doc-nfe-stages':'Organize notas recebidas em etapas internas configuráveis.',
+  'tax-analysis':'Indicadores fiscais calculados a partir dos documentos registrados.',
+  sped:'Prepare a conferência de arquivos EFD ICMS/IPI com a base documental da empresa.',
+  'key-check':'Consulta pontual de NF-e por chave de acesso.',
+  manifestations:'Acompanhe o estado documental e prepare a governança das manifestações.',
+  returns:'Organize o controle de notas de devolução e seu relacionamento com documentos de origem.'
+};
+const recordCache={};
+function wPanel(title,subtitle,body,action){return '<section class="feature-panel"><div class="feature-panel-head"><div><h2>'+esc(title)+'</h2>'+(subtitle?'<p>'+esc(subtitle)+'</p>':'')+'</div>'+(action||'')+'</div><div class="feature-panel-body">'+body+'</div></section>';}
+function wMetric(label,value,note,symbol){return '<div class="feature-card"><div class="feature-label">'+esc(label)+'<span class="feature-symbol">'+esc(symbol||'•')+'</span></div><div class="feature-value">'+esc(value)+'</div><div class="feature-note">'+esc(note||'')+'</div></div>';}
+function wButton(label,feature,variant){return '<button type="button" class="btn '+(variant||'')+'" data-feature="'+esc(feature)+'">'+esc(label)+'</button>';}
+function wEmpty(title,desc,feature){return '<div class="feature-empty"><strong>'+esc(title)+'</strong>'+esc(desc||'')+(feature?'<div style="margin-top:12px">'+wButton('Acessar módulo',feature,'primary')+'</div>':'')+'</div>';}
+function wStatus(status){const v=String(status||'');const cls=/pago|liquidado|conclu[ií]do|aprovado|autorizado/i.test(v)?'ok':/bloqueado|cancelado|vencido|diverg|rejeitado/i.test(v)?'bad':/pendente|confer|aberto|an[aá]lise|aguardando/i.test(v)?'warn':'';return '<span class="feature-status '+cls+'">'+esc(v||'Em aberto')+'</span>';}
+async function getWorkspaceRecords(area,kind){
+ const key=area+'|'+(kind||'');
+ if(recordCache[key])return recordCache[key];
+ const data=await apiRequest('/api/workspace/records?area='+encodeURIComponent(area)+(kind?'&kind='+encodeURIComponent(kind):''));
+ recordCache[key]=Array.isArray(data)?data:[];
+ return recordCache[key];
+}
+async function getFiscalDocuments(type){
+ const normalized=String(type||'').toUpperCase();
+ if(!workspaceState.documentsLoaded){
+   workspaceState.documents=await apiRequest('/api/fiscal-documents').catch(()=>[]);
+   workspaceState.documentsLoaded=true;
+ }
+ return workspaceState.documents.filter(doc=>!normalized||doc.type===normalized);
+}
+function clearWorkspaceCaches(){Object.keys(recordCache).forEach(key=>delete recordCache[key]);}
+function showWorkspaceArea(area,feature){
+ if(!workspaceConfig[area])return;
+ workspaceState.area=area;
+ workspaceState.feature=feature||'home';
+ document.querySelectorAll('[data-workspace]').forEach(button=>button.classList.toggle('active',button.dataset.workspace===area));
+ $('workspaceSideName').textContent=workspaceConfig[area].label.toUpperCase();
+ $('workspaceNavTitle').textContent=workspaceConfig[area].label.toUpperCase();
+ $('workspaceNav').innerHTML=workspaceConfig[area].items.map(item=>'<button type="button" class="'+(item[0]===workspaceState.feature?'active':'')+'" data-feature="'+esc(item[0])+'"><span class="ico">'+item[2]+'</span>'+esc(item[1])+'</button>').join('');
+ document.querySelectorAll('.page').forEach(page=>page.classList.toggle('active',page.id==='page-workspace'));
+ document.querySelectorAll('[data-page]').forEach(button=>button.classList.remove('active'));
+ $('sidebar').classList.remove('open');
+ renderWorkspaceFeature();
+}
+function renderWorkspaceFeature(){
+ const area=workspaceState.area,feature=workspaceState.feature;
+ $('workspaceEyebrow').textContent=workspaceConfig[area].label.toUpperCase()+' · CENTRAL COSTALOG';
+ $('workspaceTitle').textContent=workspaceTitleMap[feature]||feature;
+ $('workspaceDescription').textContent=workspaceDescMap[feature]||'Ferramentas de gestão da Central Costalog.';
+ $('workspaceStatus').textContent='Ambiente '+workspaceConfig[area].label;
+ $('crumb').textContent=(workspaceTitleMap[feature]||feature);
+ $('workspaceNav').querySelectorAll('[data-feature]').forEach(button=>button.classList.toggle('active',button.dataset.feature===feature));
+ $('workspaceContent').innerHTML='<div class="feature-empty"><strong>Carregando módulo...</strong>Consultando os dados armazenados na Central.</div>';
+ const renderers={
+  home:renderWorkspaceHome,documents:()=>renderDocuments(''),payments:renderPayments,payables:()=>renderRecordModule('geral','payable','Nova conta a pagar','Registrar obrigação financeira','Contas em aberto e histórico de liquidação.',{supplier:true,amount:true,dueDate:true,relatedInvoice:true,payment:true}),bills:()=>renderRecordModule('geral','bill','Novo boleto','Cadastrar boleto','Vincule o boleto à nota fiscal correspondente e acompanhe sua situação.',{supplier:true,amount:true,dueDate:true,relatedInvoice:true,barcode:true}),suppliers:renderSuppliers,automations:renderAutomations,reports:renderReports,'month-close':renderMonthClose,capture:renderCapture,library:renderLibrary,orders:renderOrders,matching:renderMatching,negotiations:renderNegotiations,'doc-nfe-stages':renderInvoiceStages,'doc-nfe':()=>renderDocuments('NFE'),'doc-nfse':()=>renderDocuments('NFSE'),'doc-cte':()=>renderDocuments('CTE'),'doc-cfe':()=>renderDocuments('CFE_SAT'),'doc-nfce':()=>renderDocuments('NFCE'),'doc-mdfe':()=>renderDocuments('MDFE'),'tax-analysis':renderTaxAnalysis,sped:renderSped,'key-check':renderKeyCheck,manifestations:renderManifestations,returns:renderReturns
+ };
+ const fn=renderers[feature]||renderWorkspaceHome;
+ Promise.resolve(fn()).then(html=>{if(workspaceState.feature===feature&&workspaceState.area===area)$('workspaceContent').innerHTML=html;}).catch(error=>{$('workspaceContent').innerHTML='<div class="feature-alert">'+esc(error.message||'Não foi possível carregar este módulo.')+'</div>';});
+}
+function workspaceJump(page){navigate(page);}
+async function renderWorkspaceHome(){
+ const invoices=state.invoices||[];
+ const payable=await getWorkspaceRecords('geral','payable').catch(()=>[]);
+ const orders=await getWorkspaceRecords('compras','purchase_order').catch(()=>[]);
+ const notes=await getWorkspaceRecords('geral','bill').catch(()=>[]);
+ const area=workspaceState.area;
+ if(area==='compras')return '<div class="feature-grid">'+wMetric('Pedidos cadastrados',orders.length,'Pedidos e contratos registrados','▤')+wMetric('Valor em compras',money(orders.reduce((a,r)=>a+Number(r.amount||0),0)),'Soma dos pedidos cadastrados','R
+</script></body></html>)+wMetric('Contas ligadas',payable.length,'Registros no contas a pagar','↗')+wMetric('Fornecedores',new Set(invoices.map(n=>n.supplierCnpj||n.supplier)).size,'Encontrados nos XMLs','♙')+'</div>'+wPanel('Ciclo de compras','Do pedido à nota e ao pagamento','<div class="feature-cards"><button class="feature-tile" data-feature="orders"><span class="tile-icon">▤</span><strong>Pedidos e contratos</strong><small>Cadastre valores, fornecedores, prazos e status de recebimento.</small></button><button class="feature-tile" data-feature="matching"><span class="tile-icon">✓</span><strong>Conferência pedido × NF</strong><small>Identifique diferenças entre valor negociado e documento fiscal.</small></button><button class="feature-tile" data-feature="negotiations"><span class="tile-icon">↔</span><strong>Negociações pendentes</strong><small>Registre tratativas e pendências com fornecedores.</small></button></div>');
+ if(area==='fiscal')return '<div class="feature-grid">'+wMetric('NF-e armazenadas',invoices.length,'Notas disponíveis na Central','▤')+wMetric('Valor fiscal',money(invoices.reduce((a,n)=>a+Number(n.total||0),0)),'Soma de NF-e registradas','R
+</script></body></html>)+wMetric('Documentos adicionais',(state.documents||[]).length,'NFS-e, CT-e, cupons e MDF-e','▧')+wMetric('Resumos pendentes',invoices.filter(n=>String(n.status||'').includes('Resumo')).length,'Documentos sem XML completo','!')+'</div>'+wPanel('Ferramentas fiscais','Consulta, conferência e organização','<div class="feature-cards"><button class="feature-tile" data-feature="documents"><span class="tile-icon">▤</span><strong>Documentos fiscais</strong><small>NF-e, NFS-e, CT-e, CF-e SAT, NFC-e e MDF-e.</small></button><button class="feature-tile" data-feature="doc-nfe-stages"><span class="tile-icon">▥</span><strong>NF-e em etapas</strong><small>Quadro de acompanhamento e conferência interna.</small></button><button class="feature-tile" data-feature="tax-analysis"><span class="tile-icon">◇</span><strong>Análise Tax</strong><small>Indicadores calculados com os dados disponíveis.</small></button><button class="feature-tile" data-feature="sped"><span class="tile-icon">▦</span><strong>Análise SPED</strong><small>Área de preparação para conferência da escrituração.</small></button><button class="feature-tile" data-feature="key-check"><span class="tile-icon">⌕</span><strong>Confere chaves</strong><small>Consulta individual por chave de acesso.</small></button></div>');
+ return '<div class="feature-grid">'+wMetric('Documentos cadastrados',invoices.length+(state.documents||[]).length,'Notas e documentos adicionais','▤')+wMetric('Valor de NF-e',money(invoices.reduce((a,n)=>a+Number(n.total||0),0)),'Valor total registrado','R
+</script></body></html>)+wMetric('Contas a pagar',payable.length,'Obrigações registradas','↗')+wMetric('Boletos cadastrados',notes.length,'Boletos controlados na Central','▧')+'</div>'+wPanel('Acesso rápido','Principais rotinas da operação','<div class="feature-cards"><button class="feature-tile" data-feature="documents"><span class="tile-icon">▤</span><strong>Documentos fiscais</strong><small>Consulte documentos por modelo, papel e período.</small></button><button class="feature-tile" data-feature="payables"><span class="tile-icon">R$</span><strong>Contas a pagar</strong><small>Registre obrigações e acompanhe aprovações.</small></button><button class="feature-tile" data-feature="bills"><span class="tile-icon">▧</span><strong>Boletos com notas</strong><small>Associe boletos a documentos fiscais.</small></button><button class="feature-tile" data-feature="suppliers"><span class="tile-icon">♙</span><strong>Fornecedores</strong><small>Visualize relacionamentos e histórico de notas.</small></button><button class="feature-tile" data-feature="reports"><span class="tile-icon">▥</span><strong>Relatórios</strong><small>Exporte indicadores da base registrada.</small></button><button class="feature-tile" data-feature="automations"><span class="tile-icon">⚡</span><strong>Automações</strong><small>Cadastre regras e gatilhos para futuras integrações.</small></button></div>');
+}
+function wDocTable(rows,isInvoice){
+ if(!rows.length)return wEmpty('Nenhum documento nesta categoria','Importe XMLs do ERP, contabilidade ou fornecedores.','capture');
+ const html=rows.map(row=>{
+  const id=row.id;
+  const docNo=row.number||'—',name=isInvoice?row.supplier:row.issuer,doc=isInvoice?row.supplierCnpj:row.issuer_document;
+  const date=row.date,total=row.total,status=row.status||'Importado';
+  const action=isInvoice?'<button class="btn" data-detail="'+esc(id??row.key)+'">Detalhes</button>':'<button class="btn" data-download-doc="'+esc(id)+'">Baixar XML</button>';
+  return '<tr><td><strong>'+esc(docNo)+'</strong><span class="secondary">'+esc(row.series||'')+'</span></td><td><strong>'+esc(name||'—')+'</strong><span class="secondary">'+esc(doc||'')+'</span></td><td>'+esc(formatDate(date))+'</td><td>'+money(total)+'</td><td>'+wStatus(status)+'</td><td>'+esc(row.source||'XML/ZIP')+'</td><td>'+action+'</td></tr>';
+ }).join('');
+ return '<div class="feature-table-wrap"><table class="feature-table"><thead><tr><th>Número / Série</th><th>Emitente</th><th>Emissão</th><th>Valor</th><th>Situação</th><th>Origem</th><th></th></tr></thead><tbody>'+html+'</tbody></table></div>';
+}
+async function renderDocuments(type){
+ const labels=[['NFE','NF-e'],['NFSE','NFS-e'],['CTE','CT-e'],['CFE_SAT','CF-e SAT'],['NFCE','NFC-e'],['MDFE','MDF-e']];
+ const current=type||workspaceState.docType||'NFE';workspaceState.docType=current;
+ const generic=await getFiscalDocuments(current);
+ const isInvoice=current==='NFE';
+ let rows=isInvoice?(state.invoices||[]):generic;
+ const q=workspaceState.docSearch.toLowerCase();
+ rows=rows.filter(row=>[row.number,row.supplier,row.issuer,row.supplierCnpj,row.issuer_document,row.key].join(' ').toLowerCase().includes(q));
+ const tabs=labels.map(item=>'<button type="button" class="'+(item[0]===current?'active':'')+'" data-doc-type="'+item[0]+'">'+item[1]+'</button>').join('');
+ const table=wDocTable(rows,isInvoice);
+ return '<div class="feature-panel"><div class="doc-type-tabs">'+tabs+'</div><div class="feature-panel-body"><div class="feature-toolbar"><input id="workspaceDocSearch" placeholder="Buscar número, empresa ou chave..." value="'+esc(workspaceState.docSearch)+'"><span class="feature-status">'+rows.length+' documento(s)</span><button type="button" class="btn primary" data-feature="capture">＋ Importar XML / ZIP</button></div>'+table+'<div class="feature-note" style="margin-top:12px">A consulta automática depende da disponibilidade legal e técnica de cada fonte. Neste momento, a Central importa os XMLs enviados. A distribuição automática já está conectada para NF-e recebida; os demais tipos entram por importação XML/ZIP.</div></div></div>';
+}
+async function renderRecordModule(area,kind,title,formTitle,subtitle,options){
+ const records=await getWorkspaceRecords(area,kind);
+ const invoices=state.invoices||[];
+ const invoiceOptions='<option value="">Não vincular</option>'+invoices.map(n=>'<option value="'+esc(n.id)+'">NF '+esc(n.number)+' · '+esc(n.supplier)+' · '+money(n.total)+'</option>').join('');
+ const fields=[];
+ fields.push('<label class="wide">Descrição / identificação<input name="title" required maxlength="240" placeholder="Ex.: '+esc(kind==='payable'?'Pagamento de fornecedor':kind==='bill'?'Boleto recebido':'Registro')+'"></label>');
+ if(options.supplier)fields.push('<label>Fornecedor<input name="supplier" maxlength="240" placeholder="Razão social"></label>');
+ if(options.amount)fields.push('<label>Valor (R$)<input name="amount" inputmode="decimal" type="number" min="0" step="0.01" placeholder="0,00"></label>');
+ if(options.dueDate)fields.push('<label>Vencimento<input name="dueDate" type="date"></label>');
+ if(options.relatedInvoice)fields.push('<label class="wide">Vincular a uma NF-e<select name="relatedInvoiceId">'+invoiceOptions+'</select></label>');
+ if(options.payment)fields.push('<label>Forma de pagamento<select name="paymentMethod"><option>Boleto</option><option>PIX</option><option>TED</option><option>Transferência</option></select></label><label>Etapa inicial<select name="status"><option>Conferência</option><option>Aguardando aprovação</option><option>Aprovado para pagamento</option></select></label>');
+ if(options.barcode)fields.push('<label class="wide">Linha digitável / código de barras<input name="barcode" maxlength="80" placeholder="Cole a linha digitável do boleto"></label><label>Etapa<select name="status"><option>Recebido</option><option>Em conferência</option><option>Associado à NF-e</option><option>Pago</option><option>Bloqueado</option><option>Cancelado</option></select></label>');
+ const body='<form class="feature-form" data-record-form data-area="'+area+'" data-kind="'+kind+'">'+fields.join('')+'<div class="feature-form-actions"><button class="btn primary" type="submit">Salvar registro</button><span class="feature-note">O registro será salvo no banco da Central e ficará disponível para auditoria.</span></div></form>';
+ const rows=records.length?'<div class="feature-table-wrap"><table class="feature-table"><thead><tr><th>Identificação</th><th>Fornecedor</th><th>Valor</th><th>Vencimento</th><th>Status</th><th>Ações</th></tr></thead><tbody>'+records.map(r=>'<tr><td><strong>'+esc(r.title)+'</strong><span class="secondary">Registro '+r.id+(r.related_invoice_id?' · NF vinculada #'+r.related_invoice_id:'')+'</span></td><td>'+esc(r.supplier||'—')+'</td><td>'+money(r.amount)+'</td><td>'+esc(formatDate(r.due_date))+'</td><td>'+wStatus(r.status)+'</td><td><div class="feature-actions"><select data-record-status="'+r.id+'" aria-label="Alterar status"><option>'+esc(r.status)+'</option>'+['Em aberto','Conferência','Em conferência','Aguardando aprovação','Aprovado para pagamento','Pago','Bloqueado','Cancelado','Liquidado','Associado à NF-e','Vencido','Concluído'].filter(s=>s!==r.status).map(s=>'<option>'+s+'</option>').join('')+'</select><button type="button" data-record-delete="'+r.id+'">Excluir</button></div></td></tr>').join('')+'</tbody></table></div>':wEmpty('Nenhum registro por enquanto','Use o formulário acima para iniciar o controle.');
+ return wPanel(formTitle,subtitle,body)+wPanel(title,'Registros armazenados na Central',rows);
+}
+async function renderPayments(){
+ const payable=await getWorkspaceRecords('geral','payable'),bills=await getWorkspaceRecords('geral','bill');
+ const pending=payable.filter(r=>!/(pago|liquidado|cancelado)/i.test(r.status)).length;
+ const due=payable.filter(r=>r.due_date&&new Date(r.due_date).getTime()<Date.now()&&!/(pago|liquidado|cancelado)/i.test(r.status)).length;
+ return '<div class="feature-grid">'+wMetric('Contas registradas',payable.length,'Contas a pagar','↗')+wMetric('Em aberto',pending,'Aguardando conferência ou pagamento','!')+wMetric('Vencidas',due,'Com vencimento anterior a hoje','⌛')+wMetric('Boletos',bills.length,'Documentos financeiros cadastrados','▧')+'</div>'+wPanel('Fluxo financeiro','Conferência → Aprovação → Pagamento → Liquidação','<div class="feature-cards"><button class="feature-tile" data-feature="payables"><span class="tile-icon">R$</span><strong>Contas a pagar</strong><small>Registre obrigações via boleto, PIX ou transferência.</small></button><button class="feature-tile" data-feature="bills"><span class="tile-icon">▧</span><strong>Boletos com notas</strong><small>Associe vencimentos e valores aos documentos fiscais.</small></button><button class="feature-tile" data-feature="reports"><span class="tile-icon">▥</span><strong>Performance financeira</strong><small>Veja pendências, vencimentos e concentração por fornecedor.</small></button></div>')+'<div class="feature-alert">Integração bancária DDA, captura automática de comprovantes e execução de pagamentos ainda dependem de convênio/credenciais bancárias e de homologação. Esta Central controla os registros internos; não movimenta dinheiro.</div>';
+}
+async function renderSuppliers(){
+ const invoices=state.invoices||[],generic=state.documents||[];
+ const groups=new Map();
+ invoices.forEach(n=>{const k=n.supplierCnpj||n.supplier||'Fornecedor não identificado';const old=groups.get(k)||{name:n.supplier,document:n.supplierCnpj,count:0,total:0};old.count++;old.total+=Number(n.total||0);groups.set(k,old);});
+ generic.forEach(n=>{const k=n.issuer_document||n.issuer||'Fornecedor não identificado';const old=groups.get(k)||{name:n.issuer,document:n.issuer_document,count:0,total:0};old.count++;old.total+=Number(n.total||0);groups.set(k,old);});
+ const records=await getWorkspaceRecords(workspaceState.area,'supplier_profile').catch(()=>[]);
+ const rows=Array.from(groups.values());
+ return '<div class="feature-grid">'+wMetric('Fornecedores identificados',rows.length,'A partir dos XMLs armazenados','♙')+wMetric('Negociações registradas', (await getWorkspaceRecords('compras','negotiation').catch(()=>[])).length,'Pendências e tratativas','↔')+'</div>'+wPanel('Base de fornecedores','Histórico consolidado de documentos fiscais',rows.length?'<div class="feature-table-wrap"><table class="feature-table"><thead><tr><th>Fornecedor</th><th>CNPJ / CPF</th><th>Documentos</th><th>Valor acumulado</th></tr></thead><tbody>'+rows.map(r=>'<tr><td><strong>'+esc(r.name)+'</strong></td><td>'+esc(r.document||'—')+'</td><td>'+r.count+'</td><td>'+money(r.total)+'</td></tr>').join('')+'</tbody></table></div>':wEmpty('Nenhum fornecedor identificado','Importe XMLs para popular o cadastro.'),'')+wPanel('Governança de fornecedores','Cadastros e qualificações adicionais',wEmpty('Cadastro avançado de fornecedores','O perfil ampliado poderá armazenar contatos, dados bancários validados e documentos de compliance. Os fornecedores identificados nos XMLs já aparecem acima.'));
+}
+async function renderAutomations(){
+ const records=await getWorkspaceRecords('geral','automation');
+ const form='<form class="feature-form" data-record-form data-area="geral" data-kind="automation"><label>Nome da regra<input name="title" required placeholder="Ex.: Encaminhar NF-e para conferência"></label><label>Gatilho<select name="trigger"><option>Nova NF-e importada</option><option>Nova NFS-e importada</option><option>Conta a pagar criada</option><option>Boleto recebido</option><option>Documento cancelado</option><option>Agendamento diário</option></select></label><label>Ação<select name="action"><option>Aplicar etiqueta</option><option>Criar pendência de conferência</option><option>Enviar notificação interna</option><option>Atualizar etapa do documento</option><option>Gerar relatório</option></select></label><label>Condição<input name="condition" placeholder="Ex.: fornecedor contém..."></label><div class="feature-form-actions"><button class="btn primary" type="submit">Salvar regra</button></div></form>';
+ const rows=records.length?'<div class="feature-table-wrap"><table class="feature-table"><thead><tr><th>Regra</th><th>Gatilho</th><th>Ação</th><th>Status</th><th></th></tr></thead><tbody>'+records.map(r=>'<tr><td><strong>'+esc(r.title)+'</strong></td><td>'+esc(r.payload?.trigger||'—')+'</td><td>'+esc(r.payload?.action||'—')+'</td><td>'+wStatus(r.status)+'</td><td><button class="btn" type="button" data-record-status="'+r.id+'" data-next-status="'+(r.status==='Ativa'?'Pausada':'Ativa')+'">'+(r.status==='Ativa'?'Pausar':'Ativar')+'</button></td></tr>').join('')+'</tbody></table></div>':wEmpty('Nenhuma automação cadastrada','Crie regras para organizar suas rotinas.');
+ return wPanel('Construtor de regras','Defina quando algo acontece e qual ação interna deve ser registrada.',form)+wPanel('Regras cadastradas','Modelos salvos para implantação e integração',rows)+'<div class="feature-alert">As regras são armazenadas como configuração. Disparos automáticos por e-mail, Slack, ERP ou manifestação fiscal ainda exigem conectores, credenciais e testes específicos; salvar uma regra não executa ações externas.</div>';
+}
+async function renderOrders(){
+ return renderRecordModule('compras','purchase_order','Pedidos registrados','Novo pedido / contrato','Cadastre o valor negociado para comparar com a nota fiscal antes do pagamento.',{supplier:true,amount:true,dueDate:true,relatedInvoice:true});
+}
+async function renderNegotiations(){
+ return renderRecordModule('compras','negotiation','Negociações com fornecedores','Nova negociação','Registre divergências comerciais, prazos e responsáveis pelo retorno.',{supplier:true,dueDate:true});
+}
+async function renderMatching(){
+ const orders=await getWorkspaceRecords('compras','purchase_order'),invoices=state.invoices||[];
+ const body=orders.map(order=>{
+  const linked=order.related_invoice_id?invoices.find(n=>String(n.id)===String(order.related_invoice_id)):null;
+  const delta=linked?Number(linked.total||0)-Number(order.amount||0):null;
+  return '<tr><td><strong>'+esc(order.title)+'</strong><span class="secondary">'+esc(order.supplier||'')+'</span></td><td>'+money(order.amount)+'</td><td>'+(linked?'NF '+esc(linked.number)+' · '+money(linked.total):'Não vinculada')+'</td><td>'+ (delta===null?'—':money(delta))+'</td><td>'+ (delta===null?wStatus('Pendente'):Math.abs(delta)<0.01?wStatus('Conferido'):wStatus('Divergência'))+'</td></tr>';
+ }).join('');
+ return wPanel('Conferência pedido × NF-e','Compare o valor do pedido com a nota fiscal vinculada.',body?'<div class="feature-table-wrap"><table class="feature-table"><thead><tr><th>Pedido / fornecedor</th><th>Valor negociado</th><th>Documento fiscal</th><th>Diferença</th><th>Resultado</th></tr></thead><tbody>'+body+'</tbody></table></div>':wEmpty('Nenhum pedido cadastrado','Cadastre pedidos e associe uma NF-e em Pedidos e contratos.','orders'))+'<div class="feature-alert">A conferência compara os valores registrados. A validação automática de contrato, itens, quantidades, preço e regras do ERP depende de dados completos do pedido e de integração ao sistema de compras.</div>';
+}
+async function renderInvoiceStages(){
+ const invoices=state.invoices||[],stages=['Entrada','Em conferência','Aguardando aprovação','Lançada / Arquivada'];
+ const records=await getWorkspaceRecords('fiscal','document_stage');
+ const ticketStage=id=>records.find(r=>Number(r.payload?.invoiceId)===Number(id))?.status||'Entrada';
+ return '<div class="feature-note">Use o seletor em cada cartão para movimentar a nota entre as etapas internas da Costalog. A alteração fica registrada no banco.</div><div class="stage-board">'+stages.map(stage=>{
+  const rows=invoices.filter(n=>ticketStage(n.id)===stage);
+  return '<div class="stage-column"><h3>'+esc(stage)+' <span>'+rows.length+'</span></h3>'+rows.map(n=>'<article class="stage-ticket"><strong>NF '+esc(n.number)+' · '+money(n.total)+'</strong><small>'+esc(n.supplier)+'</small><small>'+esc(formatDate(n.date))+'</small><select data-stage-change="'+esc(n.id)+'">'+stages.map(s=>'<option '+(s===stage?'selected':'')+'>'+esc(s)+'</option>').join('')+'</select></article>').join('')+'</div>';
+ }).join('')+'</div>';
+}
+async function renderReports(){
+ const invoices=state.invoices||[];
+ const total=invoices.reduce((a,n)=>a+Number(n.total||0),0);
+ return '<div class="feature-grid">'+wMetric('Notas na base',invoices.length,'Base atual de NF-e','▤')+wMetric('Valor total',money(total),'Soma dos valores das notas','R
+</script></body></html>)+wMetric('Fornecedores',new Set(invoices.map(n=>n.supplierCnpj||n.supplier)).size,'Emissores identificados','♙')+wMetric('Itens',invoices.reduce((a,n)=>a+(n.products||[]).length,0),'Produtos extraídos dos XMLs','▧')+'</div>'+wPanel('Relatório personalizado','Filtre por período e gere CSV com as informações armazenadas.','<div class="feature-toolbar"><label>De <input id="reportFrom" type="date"></label><label>Até <input id="reportTo" type="date"></label><button class="btn primary" type="button" id="reportExport">Exportar CSV</button></div><div class="feature-note">A exportação inclui número, série, emissão, fornecedor, CNPJ, destinatário, valor, situação, origem e chave. A seleção avançada de colunas pode ser expandida conforme os campos disponíveis em cada tipo de documento.</div>');
+}
+async function renderMonthClose(){
+ return wPanel('Fechamento mensal','Selecione o período para exportar uma relação consolidada de NF-e armazenadas.','<div class="feature-toolbar"><label>Mês de referência <input id="closeMonth" type="month" value="'+new Date().toISOString().slice(0,7)+'"></label><button type="button" class="btn primary" id="closeExport">Gerar fechamento CSV</button></div><div class="feature-note">A Central gera uma relação CSV com as NF-e registradas no banco. Para um pacote jurídico de XMLs, é necessário que os XMLs originais estejam armazenados; os XMLs históricos já registrados apenas como dados estruturados não podem ser reconstruídos como arquivos originais.</div>');
+}
+async function renderCapture(){
+ return wPanel('Importar documentos fiscais','Selecione XMLs ou pacotes ZIP. A Central identifica o tipo e grava cada documento no banco.','<div class="feature-form"><label class="wide">Arquivos XML ou ZIP<input type="file" id="workspaceCaptureInput" accept=".xml,.zip,text/xml,application/xml,application/zip" multiple></label><div class="feature-form-actions"><button type="button" class="btn primary" id="workspaceCaptureBtn">Validar e importar documentos</button><span id="workspaceCaptureFeedback" class="feature-note">Compatível com NF-e, NFS-e, CT-e, CF-e SAT, NFC-e e MDF-e quando o XML seguir um leiaute reconhecido.</span></div></div>')+'<div class="feature-note" style="margin-top:12px">A distribuição automática da SEFAZ está conectada apenas ao fluxo de NF-e. Os demais modelos entram por importação ou por futuras integrações específicas às suas fontes oficiais.</div>';
+}
+async function renderLibrary(){
+ const docs=state.documents||[];
+ return wPanel('Biblioteca fiscal','Arquivos originais importados pela Central.','<div class="feature-table-wrap"><table class="feature-table"><thead><tr><th>Tipo</th><th>Número</th><th>Emitente</th><th>Data</th><th>Arquivo</th><th></th></tr></thead><tbody>'+docs.map(d=>'<tr><td>'+esc(d.type)+'</td><td>'+esc(d.number)+'</td><td>'+esc(d.issuer)+'</td><td>'+esc(formatDate(d.date))+'</td><td>'+esc(d.file_name)+'</td><td><button class="btn" data-download-doc="'+d.id+'">Baixar XML</button></td></tr>').join('')+'</tbody></table></div>'+(docs.length?'':'<div class="feature-empty">Os documentos originais importados aparecerão aqui.</div>'));
+}
+async function renderTaxAnalysis(){
+ const invoices=state.invoices||[],groups={};
+ invoices.forEach(n=>{const key=n.supplier||'Sem fornecedor';groups[key]=(groups[key]||0)+Number(n.total||0);});
+ const ranked=Object.entries(groups).sort((a,b)=>b[1]-a[1]).slice(0,10);
+ return '<div class="feature-grid">'+wMetric('Documentos analisados',invoices.length,'NF-e com dados estruturados','▤')+wMetric('Valor fiscal',money(invoices.reduce((a,n)=>a+Number(n.total||0),0)),'Valor acumulado','R
+</script></body></html>)+wMetric('Fornecedores',ranked.length,'Maiores emissores na base','♙')+wMetric('Resumos SEFAZ',invoices.filter(n=>String(n.status||'').includes('Resumo')).length,'Sem XML completo','!')+'</div>'+wPanel('Concentração por fornecedor','Ranking baseado nos valores das NF-e registradas.',ranked.length?'<div class="feature-table-wrap"><table class="feature-table"><thead><tr><th>Fornecedor</th><th>Valor acumulado</th></tr></thead><tbody>'+ranked.map(r=>'<tr><td>'+esc(r[0])+'</td><td>'+money(r[1])+'</td></tr>').join('')+'</tbody></table></div>':wEmpty('Sem dados para análise','Importe documentos fiscais para popular os indicadores.'))+'<div class="feature-alert">Este painel apresenta indicadores simples da base Costalog. O cruzamento fiscal completo com EFD ICMS/IPI, blocos C100/C170/D100/E110/E520, cálculos de créditos e validação tributária depende de um leitor SPED dedicado, regras fiscais homologadas e revisão da contabilidade.</div>';
+}
+async function renderSped(){
+ return wPanel('Análise SPED','Preparação para cruzamento de EFD ICMS/IPI com documentos fiscais.','<div class="feature-form"><label class="wide">Arquivo EFD ICMS/IPI (.txt)<input type="file" id="spedInput" accept=".txt,.efd,text/plain"></label><div class="feature-form-actions"><button type="button" class="btn" disabled>Processamento SPED em implantação</button></div></div><div class="feature-note" style="margin-top:12px">Os blocos de interesse mapeados para conferência são 0150, 0200, C100, C170, D100, E110 e E520. O sistema ainda não executa o cruzamento fiscal completo e não deve ser utilizado como validação tributária até a implementação e homologação desse processador.</div>');
+}
+async function renderKeyCheck(){
+ return wPanel('Confere chaves','Abra a consulta individual de NF-e já integrada à SEFAZ.','<p class="feature-note">A consulta por chave é pontual e segue os limites e regras do Ambiente Nacional. Ela não substitui a distribuição automática por NSU.</p>'+wButton('Abrir consulta por chave','key-check-open','primary'));
+}
+async function renderManifestations(){
+ return wPanel('Governança de manifestações','Acompanhe resumos e documentos que podem exigir ação fiscal.','<div class="feature-note">A Central não envia manifestação do destinatário nem manifestação de desacordo automaticamente. Essas operações têm efeito fiscal e exigem decisão e autorização expressa da empresa. A execução será liberada somente após validação dos eventos, certificado, perfis e trilha de auditoria.</div>'+wEmpty('Acompanhamento em modo informativo','Resumos e documentos pendentes podem ser identificados na listagem de NF-e.','doc-nfe'));
+}
+async function renderReturns(){
+ const candidates=(state.invoices||[]).filter(n=>String(n.status||'').toLowerCase().includes('devol'));
+ return wPanel('Controle de devoluções','Organize notas identificadas como devolução e suas referências de origem.',candidates.length?wDocTable(candidates,true):wEmpty('Nenhuma devolução identificada','A base atual não contém indicação estruturada suficiente para identificar notas de devolução com segurança. Importe XMLs completos e habilite a leitura da finalidade da NF-e.'));
+}
+function recordPayloadFromForm(form){
+ const data=Object.fromEntries(new FormData(form).entries());
+ const payload={};
+ ['paymentMethod','barcode','trigger','action','condition'].forEach(key=>{if(data[key])payload[key]=data[key];});
+ return{area:form.dataset.area,kind:form.dataset.kind,title:data.title,supplier:data.supplier,supplierDocument:data.supplierDocument,amount:data.amount||null,dueDate:data.dueDate||null,relatedInvoiceId:data.relatedInvoiceId||null,status:data.status||'Em aberto',payload};
+}
+async function createWorkspaceRecord(form){
+ const data=recordPayloadFromForm(form);
+ const result=await apiRequest('/api/workspace/records',{method:'POST',body:JSON.stringify(data)});
+ clearWorkspaceCaches();toast('Registro salvo na Central');await renderWorkspaceFeature();
+}
+async function moveInvoiceStage(invoiceId,stage){
+ const records=await getWorkspaceRecords('fiscal','document_stage');
+ const existing=records.find(r=>Number(r.payload?.invoiceId)===Number(invoiceId));
+ const invoice=(state.invoices||[]).find(n=>Number(n.id)===Number(invoiceId));
+ const payload={invoiceId:Number(invoiceId),invoiceNumber:invoice?.number||''};
+ if(existing)await apiRequest('/api/workspace/records/'+existing.id,{method:'PATCH',body:JSON.stringify({status:stage,payload})});
+ else await apiRequest('/api/workspace/records',{method:'POST',body:JSON.stringify({area:'fiscal',kind:'document_stage',title:'NF '+(invoice?.number||invoiceId),status:stage,payload})});
+ clearWorkspaceCaches();await renderWorkspaceFeature();toast('Etapa da nota atualizada');
+}
+async function exportCsvFile(filename,headers,rows){
+ const cell=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+ const csv='\uFEFF'+[headers.map(cell).join(';'),...rows.map(row=>row.map(cell).join(';'))].join('\r\n');
+ const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+ const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
+async function downloadFiscalXml(id){
+ const response=await fetch(API_BASE_URL+'/api/fiscal-documents/'+encodeURIComponent(id)+'/xml',{headers:{Authorization:'Bearer '+authToken},credentials:'omit'});
+ if(!response.ok)throw Error('Não foi possível baixar o XML.');
+ const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download='documento-fiscal-'+id+'.xml';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
+async function uploadWorkspaceCapture(){
+ const input=$('workspaceCaptureInput'),feedback=$('workspaceCaptureFeedback'),files=Array.from(input?.files||[]);
+ if(!files.length){feedback.textContent='Selecione ao menos um XML ou ZIP.';return;}
+ const xmlFiles=[];
+ try{
+  for(const file of files){
+   if(file.size>30*1024*1024)throw Error(file.name+' excede 30 MB.');
+   if(file.name.toLowerCase().endsWith('.xml'))xmlFiles.push({name:file.name,text:await file.text()});
+   else if(file.name.toLowerCase().endsWith('.zip')){
+    if(!window.JSZip)throw Error('O leitor ZIP não carregou. Atualize a página.');
+    const zip=await JSZip.loadAsync(file,{checkCRC32:true});
+    for(const entry of Object.values(zip.files).filter(x=>!x.dir&&x.name.toLowerCase().endsWith('.xml')))xmlFiles.push({name:file.name+' / '+entry.name,text:await entry.async('string')});
+   }else throw Error('Formato não suportado: '+file.name);
+  }
+  let invoices=[],documents=[],errors=[];
+  for(const item of xmlFiles){
+   try{const parsed=parseFiscalXml(item.text,item.name);if(parsed.kind==='invoice')invoices.push(parsed.data);else documents.push(parsed.data);}
+   catch(e){errors.push(item.name+': '+e.message);}
+  }
+  let imported=0,duplicates=0,invalid=0;
+  for(let i=0;i<invoices.length;i+=50){const r=await apiRequest('/api/invoices/import-batch',{method:'POST',body:JSON.stringify({invoices:invoices.slice(i,i+50)})});imported+=Number(r.imported||0);duplicates+=Number(r.duplicates||0);invalid+=Number(r.invalid||0);}
+  for(let i=0;i<documents.length;i+=2){const r=await apiRequest('/api/fiscal-documents/import-batch',{method:'POST',body:JSON.stringify({documents:documents.slice(i,i+2)})});imported+=Number(r.imported||0);duplicates+=Number(r.duplicates||0);invalid+=Number(r.invalid||0);}
+  state.invoices=await apiRequest('/api/invoices');state.documents=await apiRequest('/api/fiscal-documents');workspaceState.documents=state.documents;workspaceState.documentsLoaded=true;render();
+  feedback.textContent=xmlFiles.length+' XML(s) analisado(s): '+imported+' gravado(s), '+duplicates+' duplicado(s), '+invalid+' inválido(s). '+errors.slice(0,6).join(' | ');
+  toast(imported+' documento(s) importado(s)');
+  if(workspaceState.feature==='documents'||workspaceState.feature.startsWith('doc-'))renderWorkspaceFeature();
+ }catch(error){feedback.textContent=error.message||'Falha na importação.';toast('Importação não concluída');}
+}
+function initWorkspaceUI(){
+ document.querySelectorAll('[data-workspace]').forEach(button=>button.addEventListener('click',()=>showWorkspaceArea(button.dataset.workspace,'home')));
+ $('workspaceNav').addEventListener('click',event=>{const button=event.target.closest('[data-feature]');if(!button)return;if(button.dataset.feature==='key-check-open'){navigate('history');return;}workspaceState.feature=button.dataset.feature;renderWorkspaceFeature();showWorkspaceArea(workspaceState.area,workspaceState.feature);});
+ $('workspaceContent').addEventListener('click',async event=>{
+  const tile=event.target.closest('[data-feature]');if(tile){const next=tile.dataset.feature;if(next==='key-check-open'){navigate('history');return;}workspaceState.feature=next;showWorkspaceArea(workspaceState.area,next);return;}
+  const type=event.target.closest('[data-doc-type]');if(type){workspaceState.docType=type.dataset.docType;workspaceState.docSearch='';renderWorkspaceFeature();return;}
+  const download=event.target.closest('[data-download-doc]');if(download){try{await downloadFiscalXml(download.dataset.downloadDoc);}catch(error){toast(error.message);}return;}
+  const del=event.target.closest('[data-record-delete]');if(del){if(!confirm('Excluir este registro da Central?'))return;try{await apiRequest('/api/workspace/records/'+del.dataset.recordDelete,{method:'DELETE'});clearWorkspaceCaches();await renderWorkspaceFeature();toast('Registro excluído');}catch(error){toast(error.message);}return;}
+  if(event.target.closest('#workspaceCaptureBtn'))uploadWorkspaceCapture();
+  if(event.target.closest('#reportExport')){
+   const from=$('reportFrom')?.value||'',to=$('reportTo')?.value||'';
+   const rows=(state.invoices||[]).filter(n=>(!from||String(n.date||'').slice(0,10)>=from)&&(!to||String(n.date||'').slice(0,10)<=to)).map(n=>[n.number,n.series,n.date,n.supplier,n.supplierCnpj,n.destCnpj,n.total,n.status,n.source,n.key]);
+   exportCsvFile('costalog-relatorio-fiscal.csv',['Número','Série','Emissão','Fornecedor','CNPJ fornecedor','CNPJ destinatário','Valor','Situação','Origem','Chave'],rows);
+   return;
+  }
+  if(event.target.closest('#closeExport')){
+   const month=$('closeMonth')?.value||new Date().toISOString().slice(0,7);
+   const rows=(state.invoices||[]).filter(n=>String(n.date||'').slice(0,7)===month).map(n=>[n.number,n.series,n.date,n.supplier,n.supplierCnpj,n.total,n.status,n.key]);
+   exportCsvFile('costalog-fechamento-'+month+'.csv',['Número','Série','Emissão','Fornecedor','CNPJ','Valor','Situação','Chave'],rows);
+   return;
+  }
+ });
+ $('workspaceContent').addEventListener('submit',async event=>{
+  const form=event.target.closest('[data-record-form]');if(!form)return;
+  event.preventDefault();
+  const button=form.querySelector('button[type="submit"]');if(button){button.disabled=true;button.textContent='Salvando...';}
+  try{await createWorkspaceRecord(form);}catch(error){toast(error.message);}finally{if(button){button.disabled=false;button.textContent='Salvar registro';}}
+ });
+ $('workspaceContent').addEventListener('change',async event=>{
+  const stage=event.target.closest('[data-stage-change]');if(stage){try{await moveInvoiceStage(stage.dataset.stageChange,stage.value);}catch(error){toast(error.message);}return;}
+  const status=event.target.closest('[data-record-status]');if(status){try{const next=status.dataset.nextStatus||status.value;await apiRequest('/api/workspace/records/'+status.dataset.recordStatus,{method:'PATCH',body:JSON.stringify({status:next})});clearWorkspaceCaches();await renderWorkspaceFeature();toast('Status atualizado');}catch(error){toast(error.message);}return;}
+  if(event.target.id==='workspaceCaptureInput'){return;}
+ });
+ $('workspaceContent').addEventListener('input',event=>{
+  if(event.target.id==='workspaceDocSearch'){workspaceState.docSearch=event.target.value;const cursor=event.target.selectionStart;renderWorkspaceFeature();const next=$('workspaceDocSearch');if(next){next.focus();next.setSelectionRange(cursor,cursor);}}
+ });
+}
+initWorkspaceUI();
+
 bootstrapAuth();
 </script></body></html>
