@@ -571,7 +571,7 @@ async function bootstrapAuth(){
   }
 }
 
-const workspaceState={area:'geral',feature:'home',records:[],documents:[],docType:'NFE',docSearch:''};
+const workspaceState={area:'geral',feature:'home',records:[],documents:[],docType:'NFE',docSearch:'',docFrom:'',docTo:'',docRole:'all',docStatus:''};
 const workspaceConfig={
   geral:{label:'Geral',items:[
     ['home','Painel da conta','◫'],['documents','Documentos','▤'],['payments','Gestão de pagamentos','R'],['payables','Contas a pagar','↗'],['bills','Boletos com notas','▧'],['suppliers','Fornecedores','♙'],['automations','Automações','⚡'],['reports','Relatórios','▥'],['month-close','Fechamento mensal','▣'],['capture','Captura e envio','⇧'],['library','Biblioteca digital','▤']
@@ -667,14 +667,21 @@ async function renderWorkspaceHome(){
  if(area==='fiscal')return '<div class="feature-grid">'+wMetric('NF-e armazenadas',invoices.length,'Notas disponíveis na Central','▤')+wMetric('Valor fiscal',money(invoices.reduce((a,n)=>a+Number(n.total||0),0)),'Soma de NF-e registradas','R')+wMetric('Documentos adicionais',(state.documents||[]).length,'NFS-e, CT-e, cupons e MDF-e','▧')+wMetric('Resumos pendentes',invoices.filter(n=>String(n.status||'').includes('Resumo')).length,'Documentos sem XML completo','!')+'</div>'+wPanel('Ferramentas fiscais','Consulta, conferência e organização','<div class="feature-cards"><button class="feature-tile" data-feature="documents"><span class="tile-icon">▤</span><strong>Documentos fiscais</strong><small>NF-e, NFS-e, CT-e, CF-e SAT, NFC-e e MDF-e.</small></button><button class="feature-tile" data-feature="doc-nfe-stages"><span class="tile-icon">▥</span><strong>NF-e em etapas</strong><small>Quadro de acompanhamento e conferência interna.</small></button><button class="feature-tile" data-feature="tax-analysis"><span class="tile-icon">◇</span><strong>Análise Tax</strong><small>Indicadores calculados com os dados disponíveis.</small></button><button class="feature-tile" data-feature="sped"><span class="tile-icon">▦</span><strong>Análise SPED</strong><small>Área de preparação para conferência da escrituração.</small></button><button class="feature-tile" data-feature="key-check"><span class="tile-icon">⌕</span><strong>Confere chaves</strong><small>Consulta individual por chave de acesso.</small></button></div>');
  return '<div class="feature-grid">'+wMetric('Documentos cadastrados',invoices.length+(state.documents||[]).length,'Notas e documentos adicionais','▤')+wMetric('Valor de NF-e',money(invoices.reduce((a,n)=>a+Number(n.total||0),0)),'Valor total registrado','R')+wMetric('Contas a pagar',payable.length,'Obrigações registradas','↗')+wMetric('Boletos cadastrados',notes.length,'Boletos controlados na Central','▧')+'</div>'+wPanel('Acesso rápido','Principais rotinas da operação','<div class="feature-cards"><button class="feature-tile" data-feature="documents"><span class="tile-icon">▤</span><strong>Documentos fiscais</strong><small>Consulte documentos por modelo, papel e período.</small></button><button class="feature-tile" data-feature="payables"><span class="tile-icon">R$</span><strong>Contas a pagar</strong><small>Registre obrigações e acompanhe aprovações.</small></button><button class="feature-tile" data-feature="bills"><span class="tile-icon">▧</span><strong>Boletos com notas</strong><small>Associe boletos a documentos fiscais.</small></button><button class="feature-tile" data-feature="suppliers"><span class="tile-icon">♙</span><strong>Fornecedores</strong><small>Visualize relacionamentos e histórico de notas.</small></button><button class="feature-tile" data-feature="reports"><span class="tile-icon">▥</span><strong>Relatórios</strong><small>Exporte indicadores da base registrada.</small></button><button class="feature-tile" data-feature="automations"><span class="tile-icon">⚡</span><strong>Automações</strong><small>Cadastre regras e gatilhos para futuras integrações.</small></button></div>');
 }
+function getVisibleDocumentRows(){
+ const type=workspaceState.docType||'NFE';
+ const source=type==='NFE'?(state.invoices||[]):(state.documents||[]).filter(row=>row.type===type);
+ const q=workspaceState.docSearch.toLowerCase();
+ return source.filter(row=>{const haystack=[row.number,row.supplier,row.issuer,row.supplierCnpj,row.issuer_document,row.destCnpj,row.recipient_document,row.key].join(' ').toLowerCase();const date=String(row.date||'').slice(0,10);const role=workspaceState.docRole==='all'||(workspaceState.docRole==='issued'&&Boolean(row.supplier||row.issuer))||(workspaceState.docRole==='received'&&Boolean(row.destCnpj||row.recipient_document));const statusMatch=!workspaceState.docStatus||String(row.status||'').toLowerCase().includes(workspaceState.docStatus);return haystack.includes(q)&&(!workspaceState.docFrom||date>=workspaceState.docFrom)&&(!workspaceState.docTo||date<=workspaceState.docTo)&&role&&statusMatch;});
+}
 function wDocTable(rows,isInvoice){
  if(!rows.length)return wEmpty('Nenhum documento nesta categoria','Importe XMLs do ERP, contabilidade ou fornecedores.','capture');
  const html=rows.map(row=>{
   const id=row.id;
   const docNo=row.number||'—',name=isInvoice?row.supplier:row.issuer,doc=isInvoice?row.supplierCnpj:row.issuer_document;
   const date=row.date,total=row.total,status=row.status||'Importado';
+  const entityType=isInvoice?'invoice':'fiscal_document';
   const action=isInvoice?'<button class="btn" data-detail="'+esc(id??row.key)+'">Detalhes</button>':'<button class="btn" data-download-doc="'+esc(id)+'">Baixar XML</button>';
-  return '<tr><td><strong>'+esc(docNo)+'</strong><span class="secondary">'+esc(row.series||'')+'</span></td><td><strong>'+esc(name||'—')+'</strong><span class="secondary">'+esc(doc||'')+'</span></td><td>'+esc(formatDate(date))+'</td><td>'+money(total)+'</td><td>'+wStatus(status)+'</td><td>'+esc(row.source||'XML/ZIP')+'</td><td>'+action+'</td></tr>';
+  return '<tr><td><strong>'+esc(docNo)+'</strong><span class="secondary">'+esc(row.series||'')+'</span></td><td><strong>'+esc(name||'—')+'</strong><span class="secondary">'+esc(doc||'')+'</span></td><td>'+esc(formatDate(date))+'</td><td>'+money(total)+'</td><td>'+wStatus(status)+'</td><td>'+esc(row.source||'XML/ZIP')+'</td><td><div class="feature-actions">'+action+'<button type="button" data-doc-note="comment" data-entity-type="'+entityType+'" data-entity-id="'+esc(id)+'">Comentar</button><button type="button" data-doc-note="tag" data-entity-type="'+entityType+'" data-entity-id="'+esc(id)+'">Etiquetar</button></div></td></tr>';
  }).join('');
  return '<div class="feature-table-wrap"><table class="feature-table"><thead><tr><th>Número / Série</th><th>Emitente</th><th>Emissão</th><th>Valor</th><th>Situação</th><th>Origem</th><th></th></tr></thead><tbody>'+html+'</tbody></table></div>';
 }
@@ -685,10 +692,16 @@ async function renderDocuments(type){
  const isInvoice=current==='NFE';
  let rows=isInvoice?(state.invoices||[]):generic;
  const q=workspaceState.docSearch.toLowerCase();
- rows=rows.filter(row=>[row.number,row.supplier,row.issuer,row.supplierCnpj,row.issuer_document,row.key].join(' ').toLowerCase().includes(q));
+ rows=rows.filter(row=>{
+  const haystack=[row.number,row.supplier,row.issuer,row.supplierCnpj,row.issuer_document,row.destCnpj,row.recipient_document,row.key].join(' ').toLowerCase();
+  const date=String(row.date||'').slice(0,10);
+  const role=workspaceState.docRole==='all'||(workspaceState.docRole==='issued'&&Boolean(row.supplier||row.issuer))||(workspaceState.docRole==='received'&&Boolean(row.destCnpj||row.recipient_document));
+  const statusMatch=!workspaceState.docStatus||String(row.status||'').toLowerCase().includes(workspaceState.docStatus);
+  return haystack.includes(q)&&(!workspaceState.docFrom||date>=workspaceState.docFrom)&&(!workspaceState.docTo||date<=workspaceState.docTo)&&role&&statusMatch;
+ });
  const tabs=labels.map(item=>'<button type="button" class="'+(item[0]===current?'active':'')+'" data-doc-type="'+item[0]+'">'+item[1]+'</button>').join('');
  const table=wDocTable(rows,isInvoice);
- return '<div class="feature-panel"><div class="doc-type-tabs">'+tabs+'</div><div class="feature-panel-body"><div class="feature-toolbar"><input id="workspaceDocSearch" placeholder="Buscar número, empresa ou chave..." value="'+esc(workspaceState.docSearch)+'"><span class="feature-status">'+rows.length+' documento(s)</span><button type="button" class="btn primary" data-feature="capture">＋ Importar XML / ZIP</button></div>'+table+'<div class="feature-note" style="margin-top:12px">A consulta automática depende da disponibilidade legal e técnica de cada fonte. Neste momento, a Central importa os XMLs enviados. A distribuição automática já está conectada para NF-e recebida; os demais tipos entram por importação XML/ZIP.</div></div></div>';
+ return '<div class="feature-panel"><div class="doc-type-tabs">'+tabs+'</div><div class="feature-panel-body"><div class="feature-toolbar"><input id="workspaceDocSearch" placeholder="Buscar número, empresa ou chave..." value="'+esc(workspaceState.docSearch)+'"><input type="date" id="workspaceDocFrom" aria-label="Emissão a partir de" value="'+esc(workspaceState.docFrom)+'"><input type="date" id="workspaceDocTo" aria-label="Emissão até" value="'+esc(workspaceState.docTo)+'"><select id="workspaceDocRole"><option value="all" '+(workspaceState.docRole==='all'?'selected':'')+'>Todos os papéis</option><option value="received" '+(workspaceState.docRole==='received'?'selected':'')+'>Recebidas pela Costalog</option><option value="issued" '+(workspaceState.docRole==='issued'?'selected':'')+'>Emitidas pela Costalog</option></select><select id="workspaceDocStatus"><option value="">Todas as situações</option><option value="autoriz" '+(workspaceState.docStatus==='autoriz'?'selected':'')+'>Autorizadas</option><option value="resumo" '+(workspaceState.docStatus==='resumo'?'selected':'')+'>Resumo pendente</option><option value="cancel" '+(workspaceState.docStatus==='cancel'?'selected':'')+'>Canceladas</option></select><span class="feature-status">'+rows.length+' documento(s)</span><button type="button" class="btn" id="workspaceDocExport">Exportar CSV</button><button type="button" class="btn primary" data-feature="capture">＋ Importar XML / ZIP</button></div>'+table+'<div class="feature-note" style="margin-top:12px">A consulta automática depende da disponibilidade legal e técnica de cada fonte. A distribuição SEFAZ integrada nesta versão é para NF-e; NFS-e, CT-e, CT-e OS, CF-e SAT, NFC-e e MDF-e entram por importação XML/ZIP ou integração específica. Comentários e etiquetas ficam vinculados ao documento.</div></div></div>';
 }
 async function renderRecordModule(area,kind,title,formTitle,subtitle,options){
  const records=await getWorkspaceRecords(area,kind);
@@ -851,10 +864,16 @@ function initWorkspaceUI(){
  $('workspaceContent').addEventListener('click',async event=>{
   const tile=event.target.closest('[data-feature]');if(tile){const next=tile.dataset.feature;if(next==='key-check-open'){navigate('history');return;}workspaceState.feature=next;showWorkspaceArea(workspaceState.area,next);return;}
   const type=event.target.closest('[data-doc-type]');if(type){workspaceState.docType=type.dataset.docType;workspaceState.docSearch='';renderWorkspaceFeature();return;}
+  const note=event.target.closest('[data-doc-note]');if(note){const body=window.prompt(note.dataset.docNote==='tag'?'Digite a etiqueta para este documento:':'Escreva uma observação para este documento:');if(!body||!body.trim())return;try{await apiRequest('/api/annotations',{method:'POST',body:JSON.stringify({entityType:note.dataset.entityType,entityId:Number(note.dataset.entityId),kind:note.dataset.docNote,body:body.trim()})});toast(note.dataset.docNote==='tag'?'Etiqueta adicionada ao documento':'Comentário adicionado ao documento');}catch(error){toast(error.message);}return;}
   const download=event.target.closest('[data-download-doc]');if(download){try{await downloadFiscalXml(download.dataset.downloadDoc);}catch(error){toast(error.message);}return;}
   const statusButton=event.target.closest('button[data-record-status]');if(statusButton){try{await apiRequest('/api/workspace/records/'+statusButton.dataset.recordStatus,{method:'PATCH',body:JSON.stringify({status:statusButton.dataset.nextStatus||'Ativa'})});clearWorkspaceCaches();await renderWorkspaceFeature();toast('Status da regra atualizado');}catch(error){toast(error.message);}return;}
   const del=event.target.closest('[data-record-delete]');if(del){if(!confirm('Excluir este registro da Central?'))return;try{await apiRequest('/api/workspace/records/'+del.dataset.recordDelete,{method:'DELETE'});clearWorkspaceCaches();await renderWorkspaceFeature();toast('Registro excluído');}catch(error){toast(error.message);}return;}
   if(event.target.closest('#workspaceCaptureBtn'))uploadWorkspaceCapture();
+  if(event.target.closest('#workspaceDocExport')){
+   const rows=getVisibleDocumentRows();
+   exportCsvFile('costalog-documentos-'+workspaceState.docType.toLowerCase()+'.csv',['Número','Série','Emissão','Emitente','Documento emitente','Destinatário','Documento destinatário','Valor','Situação','Chave'],rows.map(row=>[row.number,row.series,row.date,row.supplier||row.issuer,row.supplierCnpj||row.issuer_document,row.destCnpj||row.recipient_document,row.total,row.status,row.key]));
+   return;
+  }
   if(event.target.closest('#reportExport')){
    const from=$('reportFrom')?.value||'',to=$('reportTo')?.value||'';
    const rows=(state.invoices||[]).filter(n=>(!from||String(n.date||'').slice(0,10)>=from)&&(!to||String(n.date||'').slice(0,10)<=to)).map(n=>[n.number,n.series,n.date,n.supplier,n.supplierCnpj,n.destCnpj,n.total,n.status,n.source,n.key]);
@@ -875,6 +894,9 @@ function initWorkspaceUI(){
   try{await createWorkspaceRecord(form);}catch(error){toast(error.message);}finally{if(button){button.disabled=false;button.textContent='Salvar registro';}}
  });
  $('workspaceContent').addEventListener('change',async event=>{
+  if(['workspaceDocFrom','workspaceDocTo','workspaceDocRole','workspaceDocStatus'].includes(event.target.id)){
+   workspaceState.docFrom=$('workspaceDocFrom')?.value||'';workspaceState.docTo=$('workspaceDocTo')?.value||'';workspaceState.docRole=$('workspaceDocRole')?.value||'all';workspaceState.docStatus=$('workspaceDocStatus')?.value||'';renderWorkspaceFeature();return;
+  }
   const stage=event.target.closest('[data-stage-change]');if(stage){try{await moveInvoiceStage(stage.dataset.stageChange,stage.value);}catch(error){toast(error.message);}return;}
   const status=event.target.closest('[data-record-status]');if(status){try{const next=status.dataset.nextStatus||status.value;await apiRequest('/api/workspace/records/'+status.dataset.recordStatus,{method:'PATCH',body:JSON.stringify({status:next})});clearWorkspaceCaches();await renderWorkspaceFeature();toast('Status atualizado');}catch(error){toast(error.message);}return;}
   if(event.target.id==='workspaceCaptureInput'){return;}
