@@ -31,7 +31,9 @@
 <aside class="sidebar" id="sidebar">
 <div class="brand"><img src="./assets/logo-costalog-white.svg" alt="Costalog"></div>
 <div class="brand-caption">Central de gestão fiscal</div>
-<div class="nav-label">VISÃO EXECUTIVA</div><nav class="nav">
+<div class="workspace-side-head"><span class="workspace-side-kicker">ESPAÇO DE TRABALHO</span><strong id="workspaceSideName">GERAL</strong></div>
+<div class="nav-label" id="workspaceNavTitle">GERAL</div><nav class="nav" id="workspaceNav"></nav>
+<div class="nav-label">ATALHOS</div><nav class="nav">
 <button class="active" data-page="overview"><span class="ico">◫</span>Visão geral</button>
 </nav>
 <div class="nav-label">GESTÃO FISCAL</div><nav class="nav">
@@ -48,7 +50,12 @@
 <div class="side-status"><span class="status-dot" id="sidebarStatusDot"></span><div><strong id="sidebarStatus">Conectando ao ambiente</strong><small>PostgreSQL · Neon / API</small></div></div>
 <div class="side-foot">COSTALOG · A LOGÍSTICA IDEAL<br>Conectamos destinos. Movimentamos resultados.</div></aside>
 <main class="main"><header class="topbar">
-<div class="topbar-left"><button class="btn icon-btn mobile-menu" id="menuBtn" type="button" aria-label="Abrir menu">☰</button><span class="crumb">COSTALOG <span aria-hidden="true">/</span> <b id="crumb">Visão geral</b></span></div>
+<div class="topbar-left"><button class="btn icon-btn mobile-menu" id="menuBtn" type="button" aria-label="Abrir menu">☰</button><span class="crumb">COSTALOG <span aria-hidden="true">/</span> <b id="crumb">Visão geral</b></span>
+<nav class="workspace-tabs" id="workspaceTabs" aria-label="Áreas de trabalho">
+<button type="button" class="active" data-workspace="geral">Geral</button>
+<button type="button" data-workspace="compras">Compras</button>
+<button type="button" data-workspace="fiscal">Fiscal</button>
+</nav></div>
 <div class="topbar-right">
 <label class="global-search"><span aria-hidden="true">⌕</span><input id="globalSearch" type="search" placeholder="Buscar notas, fornecedores..."><kbd>Ctrl K</kbd></label>
 <div class="top-actions"><span id="apiStatus" class="api-pill">Conectando API</span><button class="btn icon-btn" id="themeToggle" type="button" aria-label="Alternar tema" title="Alternar tema"><span id="themeGlyph">☾</span></button>
@@ -64,6 +71,10 @@
 <div class="notice"><b>Ambiente fiscal</b><span id="overviewNoticeText">Consultando a situação da integração SEFAZ...</span></div>
 <div class="cards"><div class="card"><div class="stat-top">Notas importadas <span class="stat-icon">▤</span></div><div class="stat-value" id="statInvoices">0</div><div class="stat-note">Banco de dados Costalog</div></div><div class="card"><div class="stat-top">Valor total <span class="stat-icon">R$</span></div><div class="stat-value" id="statValue">R$ 0,00</div><div class="stat-note">Soma das notas cadastradas</div></div><div class="card"><div class="stat-top">Fornecedores <span class="stat-icon">♙</span></div><div class="stat-value" id="statSuppliers">0</div><div class="stat-note">Identificados nos XMLs</div></div><div class="card"><div class="stat-top">Itens de produtos <span class="stat-icon">▧</span></div><div class="stat-value" id="statProducts">0</div><div class="stat-note">Linhas de produtos importadas</div></div></div>
 <div class="panel"><div class="panel-head"><div><h2>Notas fiscais recentes</h2><p>Documentos registrados na Central</p></div><button class="btn" data-goto="invoices">Ver todas</button></div><div id="recentTable"></div></div></section>
+<section class="page" id="page-workspace">
+<div class="heading"><div><div class="eyebrow" id="workspaceEyebrow">GERAL · CENTRAL COSTALOG</div><h1 id="workspaceTitle">Painel da conta</h1><p id="workspaceDescription">Gestão integrada de documentos, fornecedores e pagamentos.</p></div><span class="pill" id="workspaceStatus">Módulo Costalog</span></div>
+<div id="workspaceContent"></div>
+</section>
 <section class="page" id="page-invoices"><div class="heading"><div><div class="eyebrow">DOCUMENTOS</div><h1>Notas fiscais</h1><p>Consulte e filtre os documentos importados.</p></div><button class="btn primary" data-goto="import">＋ Importar XML</button></div><div class="panel"><div class="toolbar"><input class="field search" id="invoiceSearch" placeholder="Buscar por número, fornecedor, CNPJ ou chave..."><input class="field" type="date" id="dateFromFilter" aria-label="Emissão a partir de"><input class="field" type="date" id="dateToFilter" aria-label="Emissão até"><select class="field" id="invoiceStatus"><option value="">Todas as situações</option><option value="Autorizada">Autorizadas</option><option value="Resumo SEFAZ — manifestação pendente">Resumos pendentes</option><option value="Importada">Importadas</option></select><select class="field" id="invoiceSource"><option value="">Todas as origens</option><option value="SEFAZ">SEFAZ</option><option value="XML/ZIP">XML / ZIP</option><option value="manual">Manual</option></select><button class="btn" id="resetInvoiceFilters" type="button">Limpar filtros</button><button class="btn primary" id="exportInvoicesBtn" type="button">↓ Exportar CSV</button></div><div id="invoiceTable"></div></div></section>
 <section class="page" id="page-history">
 <div class="heading"><div><div class="eyebrow">RECUPERAÇÃO FISCAL</div><h1>Histórico de notas</h1><p>Pesquise uma NF-e antiga pela chave de acesso e recupere o documento quando a SEFAZ disponibilizá-lo.</p></div></div>
