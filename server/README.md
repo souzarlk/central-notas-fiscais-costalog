@@ -3,13 +3,26 @@
 API Node.js + Express + PostgreSQL (Neon), com integração de Distribuição DF-e da NF-e.
 
 ## Rotas
-- GET /health
-- GET /api/invoices
-- POST /api/invoices (importação manual de XML)
-- GET /api/products
-- GET /api/suppliers
-- GET /api/sefaz/status
+- GET /health (pública, sem dados fiscais)
+- POST /api/auth/login (login administrativo com limite de tentativas)
+- GET /api/auth/me (sessão autenticada)
+- GET /api/invoices (autenticação Bearer obrigatória)
+- POST /api/invoices (importação manual de XML, autenticação Bearer obrigatória)
+- GET /api/products (autenticação Bearer obrigatória)
+- GET /api/suppliers (autenticação Bearer obrigatória)
+- GET /api/sefaz/status (autenticação Bearer obrigatória)
 - POST /api/sefaz/sync (protegida por Bearer token)
+
+## Acesso administrativo
+O site apresenta uma tela de login única. Cadastre exclusivamente nas variáveis de ambiente privadas do Render:
+
+- `ADMIN_USERNAME`: usuário administrativo.
+- `ADMIN_PASSWORD`: senha administrativa.
+- `ADMIN_AUTH_SECRET`: segredo aleatório com pelo menos 32 bytes, usado para assinar tokens de sessão.
+
+A sessão usa token HMAC-SHA256 com validade de 12 horas. O frontend guarda o token apenas em `sessionStorage` (sessão da aba) e o envia como `Authorization: Bearer ...` nas chamadas autenticadas. Ao sair, o token local é removido. As rotas de notas, produtos, fornecedores e status SEFAZ exigem autenticação. `/health` permanece público e não retorna dados fiscais. O login tem limite de 10 tentativas por IP a cada 15 minutos.
+
+Nunca coloque a senha ou o segredo de assinatura no HTML, em variáveis do frontend, no GitHub ou em logs.
 
 ## Integração SEFAZ
 A API consulta o serviço nacional NFeDistribuicaoDFe usando distNSU e certificado digital A1 com autenticação TLS mútua. O NSU fica salvo no PostgreSQL. Os documentos são processados em transação; o cursor só avança após persistir cada lote. O XML original não é armazenado.
@@ -32,11 +45,11 @@ A aplicação não envia manifestação do destinatário automaticamente. Antes 
 Nunca grave o arquivo PFX, o Base64, a senha, a connection string ou o token no GitHub, no frontend, em arquivos versionados ou logs.
 
 ## Regras e limites
+- As rotas de dados fiscais exigem login administrativo; esta versão usa uma única conta de acesso.
 - A distribuição é por NSU do interessado; a primeira consulta não garante histórico completo anterior à ativação.
 - A recuperação tem janela regulatória limitada e a sequência precisa ser mantida continuamente.
 - Para destinatário, o XML completo pode exigir manifestação de destinatário. A aplicação apenas sincroniza os documentos entregues pelo serviço e não confirma operação automaticamente.
 - Eventos de manifestação e cancelamento ainda não têm tratamento fiscal completo nesta primeira entrega; documentos não reconhecidos são registrados como processados para preservar a sequência.
-- A API ainda está sem autenticação nas rotas gerais de leitura e gravação. O token protege somente a rotina de sincronização. Não utilize dados fiscais reais até implementar autenticação/autorização para todas as rotas.
 
 ## Desenvolvimento local
 Node.js 20+. Execute npm install e npm start. O schema é preparado automaticamente ao iniciar se DATABASE_URL estiver definida.
