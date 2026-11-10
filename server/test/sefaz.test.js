@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const zlib = require('node:zlib');
-const { getConfig, buildRequest, parseResponse, parseInvoice, decompress } = require('../src/sefaz');
+const { getConfig, buildRequest, buildKeyRequest, parseResponse, parseInvoice, decompress } = require('../src/sefaz');
 
 test('buildRequest cria consulta distNSU com NSU de 15 dígitos', () => {
   const xml = buildRequest({
@@ -60,4 +60,21 @@ test('getConfig accepts a PFX Base64 stored as a server secret', () => {
       else process.env[key] = original[key];
     }
   }
+});
+
+
+test('buildKeyRequest cria consulta consChNFe com chave de 44 dígitos', () => {
+  const key = '35261113824759000130550010000012341000012345';
+  const xml = buildKeyRequest({
+    cnpj: '13824759000130',
+    tpAmb: '1',
+    cUfAutor: '35'
+  }, key);
+  assert.match(xml, /<consChNFe><chNFe>35261113824759000130550010000012341000012345<\/chNFe><\/consChNFe>/);
+  assert.match(xml, /<CNPJ>13824759000130<\/CNPJ>/);
+  assert.doesNotMatch(xml, /<distNSU>/);
+});
+
+test('buildKeyRequest rejeita chave com quantidade incorreta de dígitos', () => {
+  assert.throws(() => buildKeyRequest({ cnpj: '13824759000130', tpAmb: '1', cUfAutor: '35' }, '12345'), /44 números/);
 });
