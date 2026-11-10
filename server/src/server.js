@@ -180,6 +180,20 @@ app.get('/api/sefaz/status', requireDatabase, requireAdminAuth, async (req, res,
   catch (error) { next(error); }
 });
 
+app.post('/api/sefaz/lookup-key', requireDatabase, requireAdminAuth, async (req, res) => {
+  const key = String(req.body?.key || '').replace(/\D/g, '');
+  if (!/^\d{44}$/.test(key)) return res.status(400).json({ error: 'Informe uma chave de acesso válida com 44 números.' });
+  try {
+    const result = await sefaz.lookupByKey(pool, key);
+    res.json(result);
+  } catch (error) {
+    console.error('Falha na consulta individual de NF-e:', error.message);
+    const message = error.message || 'Falha na consulta individual pela SEFAZ.';
+    const status = /limite de segurança|aguarde uma hora|outra consulta/i.test(message) ? 429 : /não está configurada/i.test(message) ? 503 : 502;
+    res.status(status).json({ error: message });
+  }
+});
+
 app.post('/api/sefaz/sync', requireDatabase, requireSefazSyncToken, async (req, res) => {
   try {
     if (!sefaz.getConfig().configured) {
