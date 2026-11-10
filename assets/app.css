@@ -229,3 +229,10 @@ td .strong{color:var(--ink);font-weight:760}
   .topbar{padding:0 11px}.crumb{font-size:10px}
 }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+.drop .drop-actions{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap}
+.drop[aria-busy="true"]{opacity:.78;cursor:progress;pointer-events:none}
+#clearImportBtn{min-height:30px;padding:0 9px;font-size:8px}
+#resetInvoiceFilters{min-height:39px}
+#dateFromFilter,#dateToFilter{min-width:135px}
+@media(max-width:720px){.drop .drop-actions{flex-direction:column;gap:8px}.drop .drop-actions .btn{width:100%}}
