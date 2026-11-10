@@ -138,53 +138,129 @@ const key=(inf.getAttribute('Id')||'').replace(/^NFe/,'');
 if(!/^\d{44}$/.test(key))throw Error('NF-e sem chave de acesso válida de 44 dígitos.');
 return{id:'local-'+Date.now()+'-'+Math.random().toString(16).slice(2),key,number:get(ide,'nNF'),series:get(ide,'serie'),date:get(ide,'dhEmi')||get(ide,'dEmi'),supplier:get(emit,'xNome')||'Fornecedor não identificado',supplierCnpj:get(emit,'CNPJ')||get(emit,'CPF'),destCnpj:get(dest,'CNPJ')||get(dest,'CPF'),total:Number(get(total,'vNF')||0),products,payment:pays.join('; ')||'Não informado no XML',fileName,protocol:get(doc,'nProt'),status:get(doc,'cStat')==='100'?'Autorizada':'Importada'};
 }
+let importBusy=false;
+function updateImportProgress(label,percent,filesRead,imported,issues){
+  $('importProgressWrap').hidden=false;
+  $('importProgressText').textContent=label;
+  $('importProgressPercent').textContent=Math.max(0,Math.min(100,Math.round(percent)))+'%';
+  $('importProgressBar').style.width=Math.max(0,Math.min(100,percent))+'%';
+  $('importProgressFiles').textContent=Number(filesRead||0).toLocaleString('pt-BR');
+  $('importProgressImported').textContent=Number(imported||0).toLocaleString('pt-BR');
+  $('importProgressIssues').textContent=Number(issues||0).toLocaleString('pt-BR');
+}
+function renderImportResults(items){
+  $('importResults').innerHTML=items.slice(0,60).map(item=>'<div class="import-result '+esc(item.type||'')+'"><span title="'+esc(item.name)+'">'+esc(item.name)+'</span><b>'+esc(item.label)+'</b></div>').join('');
+  if(items.length>60)$('importResults').insertAdjacentHTML('beforeend','<div class="import-result"><span>Mais '+(items.length-60)+' arquivo(s)</span><b>VER RESUMO</b></div>');
+}
 async function importFiles(files){
- const selected=Array.from(files||[]);
- const xmlFiles=[],errors=[];
- for(const file of selected){
-  const name=String(file.name||'arquivo').toLowerCase();
+  if(importBusy)return;
+  const selected=Array.from(files||[]);
+  if(!selected.length)return;
+  importBusy=true;
+  $('chooseFilesBtn').disabled=true;
+  $('chooseFilesBtn').textContent='Processando...';
+  $('drop').setAttribute('aria-busy','true');
+  $('importResults').innerHTML='';
+  $('importFeedback').textContent='Validando arquivos selecionados...';
+  updateImportProgress('Preparando leitura dos arquivos...',2,0,0,0);
+  const xmlFiles=[],errors=[],resultRows=[];
+  let imported=0,duplicates=0,invalid=0,readCount=0;
   try{
-   if(name.endsWith('.xml'))xmlFiles.push({name:file.name,text:await file.text()});
-   else if(name.endsWith('.zip')){
-    if(!window.JSZip)throw Error('Biblioteca de leitura ZIP não carregou. Atualize a página e tente novamente.');
-    const zip=await JSZip.loadAsync(file);
-    const entries=Object.values(zip.files).filter(entry=>!entry.dir&&entry.name.toLowerCase().endsWith('.xml'));
-    if(!entries.length)throw Error('O ZIP não contém arquivos XML.');
-    if(entries.length>500)throw Error('O ZIP contém mais de 500 XMLs. Divida o arquivo em partes menores.');
-    const expandedSize=entries.reduce((sum,entry)=>sum+Number(entry._data?.uncompressedSize||0),0);
-    if(expandedSize>50*1024*1024)throw Error('O conteúdo descompactado ultrapassa 50 MB. Divida o arquivo ZIP em partes menores.');
-    for(const entry of entries)xmlFiles.push({name:file.name+' / '+entry.name,text:await entry.async('string')});
-   }else errors.push(file.name+': formato não suportado.');
-  }catch(error){errors.push(file.name+': '+error.message)}
- }
- if(!xmlFiles.length){$('importFeedback').textContent=errors.join(' | ')||'Selecione arquivos XML ou ZIP.';return}
- const parsed=[];
- for(const item of xmlFiles){
-  try{parsed.push(parseInvoice(item.text,item.name));}
-  catch(error){errors.push(item.name+': '+error.message);}
- }
- if(!parsed.length){$('importFeedback').textContent=errors.join(' | ')||'Nenhuma NF-e válida encontrada.';return}
- let imported=0,duplicates=0,invalid=0,localOnly=0;
- if(apiOnline){
-  for(let start=0;start<parsed.length;start+=50){
-   const chunk=parsed.slice(start,start+50);
-   try{
-    const result=await apiRequest('/api/invoices/import-batch',{method:'POST',body:JSON.stringify({invoices:chunk})});
-    imported+=result.imported||0;duplicates+=result.duplicates||0;invalid+=result.invalid||0;
-    (result.errors||[]).forEach(item=>errors.push((item.fileName||'Arquivo')+': '+item.reason));
-   }catch(error){invalid+=chunk.length;errors.push('Lote não gravado: '+error.message);}
+    if(!apiOnline)throw Error('A Central está sem conexão com a API. Entre novamente ou aguarde o serviço voltar antes de importar. Nenhuma nota foi salva apenas no navegador.');
+    const totalBytes=selected.reduce((sum,file)=>sum+Number(file.size||0),0);
+    if(totalBytes>75*1024*1024)throw Error('O conjunto selecionado ultrapassa 75 MB. Divida a importação em lotes menores.');
+    for(let fileIndex=0;fileIndex<selected.length;fileIndex++){
+      const file=selected[fileIndex],name=String(file.name||'arquivo');
+      try{
+        if(file.size>30*1024*1024)throw Error('Arquivo individual acima de 30 MB.');
+        if(name.toLowerCase().endsWith('.xml')){
+          if(file.size>10*1024*1024)throw Error('XML acima de 10 MB.');
+          xmlFiles.push({name,text:await file.text()});
+        }else if(name.toLowerCase().endsWith('.zip')){
+          if(!window.JSZip)throw Error('Leitor ZIP não carregou. Atualize a página e tente novamente; também é possível selecionar os XMLs extraídos.');
+          const zip=await JSZip.loadAsync(file,{checkCRC32:true});
+          const entries=Object.values(zip.files).filter(entry=>!entry.dir&&entry.name.toLowerCase().endsWith('.xml'));
+          if(!entries.length)throw Error('O ZIP não contém arquivos XML.');
+          if(entries.length>500)throw Error('O ZIP contém mais de 500 XMLs. Divida o arquivo.');
+          const expandedSize=entries.reduce((sum,entry)=>sum+Number(entry._data?.uncompressedSize||0),0);
+          if(expandedSize>50*1024*1024)throw Error('O conteúdo descompactado ultrapassa 50 MB. Divida o arquivo ZIP.');
+          for(const entry of entries){
+            if(xmlFiles.length>=500)throw Error('O lote ultrapassou 500 XMLs. Divida a importação.');
+            xmlFiles.push({name:name+' / '+entry.name,text:await entry.async('string')});
+          }
+        }else{
+          throw Error('Formato não suportado. Use XML ou ZIP.');
+        }
+      }catch(error){
+        errors.push(name+': '+error.message);
+        resultRows.push({name,type:'error',label:'NÃO LIDO'});
+      }
+      readCount++;
+      updateImportProgress('Lendo arquivos e extraindo XMLs...',5+(readCount/selected.length)*18,readCount,0,errors.length);
+      renderImportResults(resultRows);
+    }
+    if(!xmlFiles.length)throw Error(errors.join(' | ')||'Nenhum XML encontrado nos arquivos selecionados.');
+    if(xmlFiles.length>500)throw Error('O lote ultrapassou 500 XMLs. Divida a importação.');
+    const parsed=[],knownKeys=new Set(state.invoices.map(item=>digits(item.key||item.accessKey)).filter(key=>key.length===44));
+    for(let index=0;index<xmlFiles.length;index++){
+      const item=xmlFiles[index];
+      try{
+        const data=parseInvoice(item.text,item.name),key=digits(data.key);
+        if(key.length!==44)throw Error('Chave de acesso inválida.');
+        if(knownKeys.has(key)){
+          duplicates++;
+          resultRows.push({name:item.name,type:'warn',label:'JÁ CADASTRADA'});
+        }else{
+          knownKeys.add(key);
+          parsed.push(data);
+          resultRows.push({name:item.name,type:'ok',label:'XML VALIDADO'});
+        }
+      }catch(error){
+        invalid++;
+        errors.push(item.name+': '+error.message);
+        resultRows.push({name:item.name,type:'error',label:'XML INVÁLIDO'});
+      }
+      updateImportProgress('Validando estrutura e chave de acesso...',25+(index+1)/xmlFiles.length*28,readCount,0,duplicates+invalid);
+      if(index%8===0)renderImportResults(resultRows);
+    }
+    renderImportResults(resultRows);
+    if(!parsed.length){
+      updateImportProgress('Validação concluída — nenhum documento novo para gravar.',100,readCount,0,duplicates+invalid);
+      $('importFeedback').textContent='Foram identificados '+duplicates+' documento(s) já cadastrado(s) e '+invalid+' arquivo(s) inválido(s). Nenhuma nova nota precisou ser gravada.';
+      return;
+    }
+    const chunks=[];
+    for(let start=0;start<parsed.length;start+=50)chunks.push(parsed.slice(start,start+50));
+    for(let index=0;index<chunks.length;index++){
+      const result=await apiRequest('/api/invoices/import-batch',{method:'POST',body:JSON.stringify({invoices:chunks[index]})});
+      imported+=Number(result.imported||0);
+      duplicates+=Number(result.duplicates||0);
+      invalid+=Number(result.invalid||0);
+      (result.errors||[]).forEach(item=>{
+        errors.push((item.fileName||'Arquivo')+': '+item.reason);
+        resultRows.push({name:item.fileName||'Documento',type:'error',label:'NÃO GRAVADO'});
+      });
+      updateImportProgress('Gravando lote '+(index+1)+' de '+chunks.length+' no banco...',53+((index+1)/chunks.length)*40,readCount,imported,duplicates+invalid);
+      renderImportResults(resultRows);
+    }
+    const saved=await apiRequest('/api/invoices');
+    state.invoices=Array.isArray(saved)?saved:[];
+    render();
+    updateImportProgress('Importação finalizada e banco atualizado.',100,readCount,imported,duplicates+invalid);
+    const message=xmlFiles.length+' XML(s) analisado(s): '+imported+' nota(s) gravada(s), '+duplicates+' duplicada(s), '+invalid+' inválida(s).';
+    $('importFeedback').textContent=message+(errors.length?' '+errors.slice(0,12).join(' | '):'');
+    if(imported)toast(imported+' NF-e(s) gravada(s) no Neon');
+    else toast('Leitura concluída: nenhum documento novo');
+  }catch(error){
+    updateImportProgress('Importação interrompida.',100,readCount,imported,duplicates+invalid+errors.length);
+    $('importFeedback').textContent=error.message||'Não foi possível concluir a importação.';
+    toast('A importação não foi concluída');
+  }finally{
+    importBusy=false;
+    $('chooseFilesBtn').disabled=false;
+    $('chooseFilesBtn').textContent='Escolher arquivos';
+    $('drop').removeAttribute('aria-busy');
   }
-  const saved=await apiRequest('/api/invoices');
-  state.invoices=Array.isArray(saved)?saved:[];
- }else{
-  state.invoices.push(...parsed);imported=parsed.length;localOnly=parsed.length;
- }
- render();
- let message=xmlFiles.length+' XML(s) localizado(s). '+imported+' importado(s), '+duplicates+' duplicado(s), '+invalid+' inválido(s).';
- if(localOnly)message+=' Os dados ficaram somente nesta sessão porque a API não está conectada.';
- if(errors.length)message+=' Detalhes: '+errors.slice(0,20).join(' | ');
- $('importFeedback').textContent=message;
- if(imported)toast(imported+' NF-e(s) importada(s)');
 }
 function table(headers,rows,empty){if(!rows.length)return '<div class="empty"><div class="empty-icon">▤</div><strong>'+empty+'</strong><span>Importe arquivos XML para começar.</span></div>';return '<div class="table-wrap"><table><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>'}
 function invoiceRows(items){return items.map(n=>'<tr><td><span class="strong">NF '+esc(n.number||'—')+'</span><div class="muted">Série '+esc(n.series||'—')+'</div></td><td><span class="strong">'+esc(n.supplier)+'</span><div class="muted">'+esc(n.supplierCnpj)+'</div></td><td>'+esc(formatDate(n.date))+'</td><td class="strong">'+money(n.total)+'</td><td><span class="pill green">● '+esc(n.status)+'</span></td><td>'+esc(n.source||'manual')+'</td><td><button class="btn" data-detail="'+esc(n.id??n.key)+'">Detalhes</button></td></tr>')}
@@ -193,7 +269,17 @@ function formatDate(s){if(!s)return'—';const d=new Date(s);return isNaN(d)?s:d
 function render(){const inv=state.invoices,prods=inv.flatMap(n=>n.products.map(p=>({...p,supplier:n.supplier,number:n.number})));$('statInvoices').textContent=inv.length;$('statValue').textContent=money(inv.reduce((a,n)=>a+Number(n.total||0),0));$('statSuppliers').textContent=new Set(inv.map(n=>n.supplierCnpj||n.supplier)).size;$('statProducts').textContent=prods.length;$('recentTable').innerHTML=table(['Nota','Fornecedor','Emissão','Valor total','Situação','Origem',''],invoiceRows(inv.slice(-5).reverse()),'Nenhuma nota importada');let search=($('invoiceSearch')?.value||'').toLowerCase(),date=$('dateFilter')?.value||'',source=$('invoiceSource')?.value||'';let filtered=inv.filter(n=>([n.number,n.supplier,n.supplierCnpj,n.key].join(' ').toLowerCase().includes(search))&&(!date||String(n.date||'').slice(0,10)===date)&&(!source||String(n.source||'manual')===source));$('invoiceTable').innerHTML=table(['Nota','Fornecedor','Emissão','Valor total','Situação','Origem',''],invoiceRows(filtered.slice().reverse()),'Nenhuma nota encontrada');let ps=($('productSearch')?.value||'').toLowerCase();$('productsTable').innerHTML=table(['Código','Descrição','Fornecedor','Qtd.','Unidade','Valor total'],prods.filter(p=>(p.description+' '+p.code+' '+p.supplier).toLowerCase().includes(ps)).map(p=>'<tr><td>'+esc(p.code)+'</td><td class="strong">'+esc(p.description)+'</td><td>'+esc(p.supplier)+'</td><td>'+Number(p.quantity||0).toLocaleString('pt-BR')+'</td><td>'+esc(p.unit)+'</td><td class="strong">'+money(p.total)+'</td></tr>'),'Nenhum produto identificado');const suppliers=[...new Map(inv.map(n=>[n.supplierCnpj||n.supplier,n])).values()];$('suppliersTable').innerHTML=table(['Fornecedor','CNPJ/CPF','Notas importadas','Total'],suppliers.map(s=>{const ns=inv.filter(n=>(n.supplierCnpj||n.supplier)===(s.supplierCnpj||s.supplier));return '<tr><td class="strong">'+esc(s.supplier)+'</td><td>'+esc(s.supplierCnpj)+'</td><td>'+ns.length+'</td><td class="strong">'+money(ns.reduce((a,n)=>a+Number(n.total||0),0))+'</td></tr>'}),'Nenhum fornecedor identificado')}
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2800)}
 function navigate(page){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+page));document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('crumb').textContent=({overview:'Visão geral',invoices:'Notas fiscais',products:'Produtos',suppliers:'Fornecedores',import:'Importar XML',history:'Histórico / recuperação',settings:'Configurações'})[page]||page;$('sidebar').classList.remove('open');render()}
-document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.goto)));$('menuBtn').addEventListener('click',()=>$('sidebar').classList.toggle('open'));$('xmlFiles').addEventListener('change',e=>importFiles(e.target.files));$('drop').addEventListener('click',e=>{if(e.target.tagName!=='INPUT')$('xmlFiles').click()});['dragenter','dragover'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();$('drop').classList.add('drag')}));['dragleave','drop'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();$('drop').classList.remove('drag')}));$('drop').addEventListener('drop',e=>importFiles(e.dataTransfer.files));$('invoiceSearch').addEventListener('input',render);$('dateFilter').addEventListener('change',render);$('productSearch').addEventListener('input',render);$('invoiceSource').addEventListener('change',render);
+document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));
+document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.goto)));
+$('menuBtn').addEventListener('click',()=>$('sidebar').classList.toggle('open'));
+$('chooseFilesBtn').addEventListener('click',event=>{event.stopPropagation();$('xmlFiles').click();});
+$('xmlFiles').addEventListener('change',event=>{const files=event.target.files;importFiles(files).finally(()=>{event.target.value='';});});
+$('drop').addEventListener('click',event=>{if(event.target.closest('button'))return;$('xmlFiles').click();});
+$('drop').addEventListener('keydown',event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();$('xmlFiles').click();}});
+['dragenter','dragover'].forEach(name=>$('drop').addEventListener(name,event=>{event.preventDefault();$('drop').classList.add('drag');}));
+['dragleave'].forEach(name=>$('drop').addEventListener(name,event=>{if(!$('drop').contains(event.relatedTarget))$('drop').classList.remove('drag');}));
+$('drop').addEventListener('drop',event=>{event.preventDefault();$('drop').classList.remove('drag');if(event.dataTransfer?.files?.length)importFiles(event.dataTransfer.files);});
+$('invoiceSearch').addEventListener('input',render);$('dateFilter').addEventListener('change',render);$('productSearch').addEventListener('input',render);$('invoiceSource').addEventListener('change',render);
 $('exportInvoicesBtn').addEventListener('click',async()=>{
  const button=$('exportInvoicesBtn');button.disabled=true;button.textContent='Preparando CSV...';
  try{
