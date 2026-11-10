@@ -382,15 +382,18 @@ async function refreshSefazStatus(){
   $('overviewNoticeText').textContent=status.configured
     ?'Integração SEFAZ configurada. Último retorno: '+(status.lastStatus||'ainda não consultado')+' — '+(status.lastMessage||'Aguardando resposta do serviço fiscal')+'.'
     :'A integração automática aguarda a conclusão da configuração segura do certificado A1 e das credenciais no servidor.';
-  $('sefazPill').textContent=status.configured?'Integração configurada':'Aguardando certificado';
-  $('sefazPill').className='pill'+(status.configured?' green':'');
+  const syncBlocked=String(status.lastStatus)==='656';
+  $('sefazPill').textContent=syncBlocked?'Aguardando liberação SEFAZ':status.configured?'Integração configurada':'Aguardando certificado';
+  $('sefazPill').className='pill'+(syncBlocked?' warning':status.configured?' green':'');
   $('sefazMessage').textContent=status.configured?(status.lastMessage||'Integração pronta para consultar a SEFAZ.'):'A consulta automática ainda aguarda o novo certificado A1 e os segredos do Render/GitHub.';
   $('sefazCertificate').textContent=status.certificateConfigured&&status.certificatePasswordConfigured?'Certificado A1 e senha configurados no servidor':'Aguardando novo certificado A1 no Render';
   $('sefazLastSync').textContent=formatDateTime(status.lastSyncAt);
   $('sefazNextSync').textContent=formatDateTime(status.nextSyncAt);
-  $('sefazNsu').textContent=(status.lastNSU||'0')+' / '+(status.maxNSU||'0');
+  $('sefazNsu').textContent=(status.lastNSU||'0')+' / '+(status.maxNSU||'—');
   $('sefazDocs').textContent=Number(status.processedDocuments||0).toLocaleString('pt-BR');
-  $('sefazNote').textContent=status.configured
+  $('sefazNote').textContent=syncBlocked
+    ?'A SEFAZ recusou esta consulta por consumo indevido (cStat 656). Nenhuma nota foi importada nesta tentativa. Aguarde pelo menos 1 hora. Se o bloqueio voltar, verifique se outro ERP, contador ou sistema também consulta este CNPJ: todos precisam seguir a mesma sequência NSU.'
+    :status.configured
     ?'Último retorno da SEFAZ: '+(status.lastStatus||'sem consulta')+'. O agendamento respeita o intervalo mínimo de uma hora quando não há documentos novos.'
     :'A integração aguarda a conclusão das configurações técnicas no servidor.';
   return status;
