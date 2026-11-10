@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const { Pool } = require('pg');
 const crypto = require('node:crypto');
 const sefaz = require('./sefaz');
+const auth = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,6 +27,25 @@ app.use(rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false
 }));
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { error: 'Muitas tentativas de acesso. Aguarde 15 minutos e tente novamente.' }
+});
+
+function requireAdminAuth(req, res, next) {
+  const config = auth.getAuthConfig();
+  if (!config.configured) return res.status(503).json({ error: 'Autenticação administrativa ainda não configurada no Render.' });
+  const authorization = String(req.headers.authorization || '');
+  const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+  const claims = auth.verifyAdminToken(token, config.secret);
+  if (!claims) return res.status(401).json({ error: 'Sessão inválida ou expirada. Entre novamente.' });
+  req.admin = { username: claims.sub };
+  next();
+}
 
 function requireDatabase(req, res, next) {
   if (!pool) return res.status(503).json({ error: 'Banco ainda não configurado. Defina DATABASE_URL no Render.' });
@@ -66,6 +86,22 @@ async function initializeDatabase() {
   console.log('Estrutura do PostgreSQL verificada.');
 }
 
+app.post('/api/auth/login', loginLimiter, (req, res) => {
+  const config = auth.getAuthConfig();
+  if (!config.configured) return res.status(503).json({ error: 'Autenticação administrativa ainda não configurada no Render.' });
+  const username = typeof req.body?.username === 'string' ? req.body.username : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!auth.safeEqual(username, config.username) || !auth.safeEqual(password, config.password)) {
+    return res.status(401).json({ error: 'Usuário ou senha incorretos.' });
+  }
+  const session = auth.createAdminToken(config.username, config.secret);
+  res.json({ token: session.token, expiresAt: session.expiresAt, user: config.username });
+});
+
+app.get('/api/auth/me', requireAdminAuth, (req, res) => {
+  res.json({ authenticated: true, user: req.admin.username });
+});
+
 app.get('/', (req, res) => {
   res.json({
     service: 'Central de Notas Fiscais Costalog API',
@@ -80,7 +116,7 @@ app.get('/', (req, res) => {
       sefazSync: 'POST /api/sefaz/sync (token protegido)'
     },
     sefazIntegration: 'Distribuição DF-e com sincronização protegida',
-    authentication: 'disabled'
+    authentication: auth.getAuthConfig().configured ? 'enabled' : 'not_configured'
   });
 });
 
@@ -94,31 +130,31 @@ app.get('/health', async (req, res) => {
       return res.status(503).json({ status: 'degraded', databaseConfigured: true, databaseConnected: false });
     }
   }
-  res.json({ status: 'ok', databaseConfigured: Boolean(pool), databaseConnected, authentication: 'disabled' });
+  res.json({ status: 'ok', databaseConfigured: Boolean(pool), databaseConnected, authentication: auth.getAuthConfig().configured ? 'enabled' : 'not_configured' });
 });
 
-app.get('/api/invoices', requireDatabase, async (req, res, next) => {
+app.get('/api/invoices', requireDatabase, requireAdminAuth, async (req, res, next) => {
   try {
     const result = await pool.query("SELECT i.id, COALESCE(i.access_key, 'Não informada') AS key, i.access_key AS \"accessKey\", i.invoice_number AS number, i.series, i.issue_date AS date, i.supplier_name AS supplier, i.supplier_document AS \"supplierCnpj\", i.recipient_document AS \"destCnpj\", i.total, i.payment_info AS payment, i.protocol, i.status, i.file_name AS \"fileName\", COALESCE((SELECT json_agg(json_build_object('code',p.product_code,'description',p.description,'ncm',p.ncm,'cfop',p.cfop,'unit',p.unit,'quantity',p.quantity,'unitPrice',p.unit_price,'total',p.total) ORDER BY p.item_number) FROM invoice_products p WHERE p.invoice_id=i.id), '[]'::json) AS products FROM invoices i ORDER BY i.issue_date DESC NULLS LAST, i.id DESC LIMIT 1000");
     res.json(result.rows);
   } catch (error) { next(error); }
 });
 
-app.get('/api/suppliers', requireDatabase, async (req, res, next) => {
+app.get('/api/suppliers', requireDatabase, requireAdminAuth, async (req, res, next) => {
   try {
     const result = await pool.query("SELECT s.id,s.name,s.document,COUNT(i.id)::int AS invoice_count,COALESCE(SUM(i.total),0)::numeric(15,2) AS total_value FROM suppliers s LEFT JOIN invoices i ON i.supplier_id=s.id GROUP BY s.id ORDER BY s.name");
     res.json(result.rows);
   } catch (error) { next(error); }
 });
 
-app.get('/api/products', requireDatabase, async (req, res, next) => {
+app.get('/api/products', requireDatabase, requireAdminAuth, async (req, res, next) => {
   try {
     const result = await pool.query("SELECT p.*,i.invoice_number,i.supplier_name FROM invoice_products p JOIN invoices i ON i.id=p.invoice_id ORDER BY p.id DESC LIMIT 5000");
     res.json(result.rows);
   } catch (error) { next(error); }
 });
 
-app.get('/api/sefaz/status', requireDatabase, async (req, res, next) => {
+app.get('/api/sefaz/status', requireDatabase, requireAdminAuth, async (req, res, next) => {
   try { res.json(await sefaz.getStatus(pool)); }
   catch (error) { next(error); }
 });
@@ -135,7 +171,7 @@ app.post('/api/sefaz/sync', requireDatabase, requireSefazSyncToken, async (req, 
   }
 });
 
-app.post('/api/invoices', requireDatabase, async (req, res, next) => {
+app.post('/api/invoices', requireDatabase, requireAdminAuth, async (req, res, next) => {
   const data = req.body || {};
   const supplierName = String(data.supplier || '').trim();
   if (!supplierName) return res.status(400).json({ error: 'Fornecedor não identificado.' });
