@@ -310,4 +310,4 @@ td .strong{color:var(--ink);font-weight:760}
 .feature-status.bad{background:var(--red-soft);color:var(--red)}
 @media(max-width:1050px){.feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.feature-layout{grid-template-columns:1fr}.workspace-tabs{margin-left:8px}}
 @media(max-width:740px){.workspace-tabs{margin-left:0;gap:2px}.workspace-tabs button{padding:7px 9px;font-size:9px}.feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.feature-form{grid-template-columns:1fr}.feature-form .wide{grid-column:auto}.feature-form-actions{grid-column:auto}.stage-board{grid-template-columns:repeat(4,210px)}}
-@media(max-width:450px){.workspace-tabs{display:none}.feature-grid{grid-template-columns:1fr 1fr}.feature-card{padding:12px}.feature-card .feature-value{font-size:21px}}
+@media(max-width:450px){.workspace-tabs{display:flex;overflow-x:auto;max-width:100%;margin:0;padding:3px}.workspace-tabs button{white-space:nowrap;flex:0 0 auto}.feature-grid{grid-template-columns:1fr 1fr}.feature-card{padding:12px}.feature-card .feature-value{font-size:21px}}
