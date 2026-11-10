@@ -112,6 +112,9 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/health',
       invoices: '/api/invoices',
+      invoiceImportBatch: 'POST /api/invoices/import-batch',
+      invoiceExportCsv: '/api/invoices/export.csv',
+      sefazLookupByKey: 'POST /api/sefaz/lookup-key',
       suppliers: '/api/suppliers',
       products: '/api/products',
       sefazStatus: '/api/sefaz/status',
