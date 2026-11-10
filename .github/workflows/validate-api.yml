@@ -33,6 +33,7 @@ jobs:
       - name: Verificar sintaxe
         run: |
           node --check src/server.js
+          node --check src/auth.js
           node --check src/sefaz.js
       - name: Executar testes
         run: npm test
