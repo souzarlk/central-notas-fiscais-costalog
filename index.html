@@ -388,7 +388,9 @@ async function refreshSefazStatus(){
   $('sefazMessage').textContent=status.configured?(status.lastMessage||'Integração pronta para consultar a SEFAZ.'):'A consulta automática ainda aguarda o novo certificado A1 e os segredos do Render/GitHub.';
   $('sefazCertificate').textContent=status.certificateConfigured&&status.certificatePasswordConfigured?'Certificado A1 e senha configurados no servidor':'Aguardando novo certificado A1 no Render';
   $('sefazLastSync').textContent=formatDateTime(status.lastSyncAt);
-  $('sefazNextSync').textContent=formatDateTime(status.nextSyncAt);
+    const nextAllowedAt=status.nextSyncAt?new Date(status.nextSyncAt):null;
+  const nextAllowedExpired=nextAllowedAt&&!Number.isNaN(nextAllowedAt.getTime())&&nextAllowedAt.getTime()<=Date.now();
+  $('sefazNextSync').textContent=nextAllowedExpired?'Liberada — aguardando execução automática':formatDateTime(status.nextSyncAt);
   $('sefazNsu').textContent=(status.lastNSU||'0')+' / '+(status.maxNSU||'—');
   $('sefazDocs').textContent=Number(status.processedDocuments||0).toLocaleString('pt-BR');
   $('sefazNote').textContent=syncBlocked
