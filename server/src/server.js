@@ -206,6 +206,75 @@ app.post('/api/sefaz/sync', requireDatabase, requireSefazSyncToken, async (req, 
   }
 });
 
+app.post('/api/invoices/import-batch', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  const invoices = Array.isArray(req.body?.invoices) ? req.body.invoices : [];
+  if (!invoices.length) return res.status(400).json({ error: 'Nenhuma NF-e foi enviada para importação.' });
+  if (invoices.length > 100) return res.status(400).json({ error: 'Importe no máximo 100 notas por lote.' });
+  const summary = { received: invoices.length, imported: 0, duplicates: 0, invalid: 0, errors: [] };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (let index = 0; index < invoices.length; index++) {
+      const data = invoices[index] || {};
+      const key = String(data.key || data.accessKey || '').replace(/\D/g, '');
+      const supplierName = String(data.supplier || '').trim();
+      const total = Number(data.total);
+      const products = Array.isArray(data.products) ? data.products : [];
+      const issueDate = data.date ? new Date(data.date) : null;
+      let reason = '';
+      if (!/^\d{44}$/.test(key)) reason = 'Chave de acesso ausente ou inválida (44 dígitos obrigatórios).';
+      else if (!supplierName) reason = 'Fornecedor não identificado.';
+      else if (!Number.isFinite(total) || total < 0) reason = 'Valor total inválido.';
+      else if (products.length > 500) reason = 'A NF-e excede o limite de 500 itens.';
+      else if (issueDate && Number.isNaN(issueDate.getTime())) reason = 'Data de emissão inválida.';
+      if (reason) {
+        summary.invalid++;
+        summary.errors.push({ fileName: String(data.fileName || 'Arquivo ' + (index+1)), reason });
+        continue;
+      }
+      await client.query('SAVEPOINT invoice_import_item');
+      try {
+        const supplierDocument = cleanDocument(data.supplierCnpj);
+        const identityKey = supplierDocument || supplierName.toLocaleLowerCase('pt-BR');
+        const supplierResult = await client.query(
+          "INSERT INTO suppliers (identity_key,document,name) VALUES ($1,$2,$3) ON CONFLICT (identity_key) DO UPDATE SET document=EXCLUDED.document,name=EXCLUDED.name,updated_at=NOW() RETURNING id",
+          [identityKey, supplierDocument, supplierName]
+        );
+        const inserted = await client.query(
+          "INSERT INTO invoices (access_key,invoice_number,series,issue_date,supplier_id,supplier_name,supplier_document,recipient_document,total,payment_info,protocol,status,file_name,source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'XML/ZIP') ON CONFLICT (access_key) DO NOTHING RETURNING id",
+          [key,String(data.number||''),String(data.series||''),issueDate,supplierResult.rows[0].id,supplierName,supplierDocument,cleanDocument(data.destCnpj),total,String(data.payment||''),String(data.protocol||''),String(data.status||'Importada por XML'),String(data.fileName||'')]
+        );
+        if (!inserted.rows.length) {
+          await client.query('ROLLBACK TO SAVEPOINT invoice_import_item');
+          summary.duplicates++;
+          continue;
+        }
+        const invoiceId = inserted.rows[0].id;
+        for (let item = 0; item < products.length; item++) {
+          const product = products[item] || {};
+          await client.query(
+            "INSERT INTO invoice_products (invoice_id,item_number,product_code,description,ncm,cfop,unit,quantity,unit_price,total) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)",
+            [invoiceId,item+1,String(product.code||''),String(product.description||''),String(product.ncm||''),String(product.cfop||''),String(product.unit||''),Number(product.quantity)||0,Number(product.unitPrice)||0,Number(product.total)||0]
+          );
+        }
+        summary.imported++;
+        await client.query('RELEASE SAVEPOINT invoice_import_item');
+      } catch (itemError) {
+        await client.query('ROLLBACK TO SAVEPOINT invoice_import_item');
+        summary.invalid++;
+        summary.errors.push({ fileName: String(data.fileName || 'Arquivo ' + (index+1)), reason: 'Falha ao gravar esta NF-e.' });
+      }
+    }
+    await client.query('COMMIT');
+    res.json(summary);
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/api/invoices', requireDatabase, requireAdminAuth, async (req, res, next) => {
   const data = req.body || {};
   const supplierName = String(data.supplier || '').trim();
