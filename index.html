@@ -5,7 +5,7 @@
 <meta name="theme-color" content="#141c24"><meta name="description" content="Central fiscal Costalog: gestão de NF-e, histórico, fornecedores e importação de documentos."><link rel="icon" type="image/svg+xml" href="./assets/logo-costalog.svg"><title>Central Fiscal | Costalog</title>
 <link rel="stylesheet" href="./assets/app.css?v=20261110">
 </head>
-<body>
+<body data-theme="light">
 <div class="auth-screen" id="authScreen">
   <section class="auth-brand-panel">
     <div class="auth-brand"><img src="./assets/logo-costalog-white.svg" alt="Costalog"></div>
@@ -63,7 +63,7 @@
 <div class="heading"><div><div class="eyebrow">VISÃO EXECUTIVA</div><h1>Painel de controle</h1><p>Indicadores consolidados do ambiente fiscal.</p></div><span id="dashboardUpdated" class="pill">Dados da Central</span></div>
 <div class="notice"><b>Ambiente fiscal</b><span id="overviewNoticeText">Consultando a situação da integração SEFAZ...</span></div>
 <div class="cards"><div class="card"><div class="stat-top">Notas importadas <span class="stat-icon">▤</span></div><div class="stat-value" id="statInvoices">0</div><div class="stat-note">Banco de dados Costalog</div></div><div class="card"><div class="stat-top">Valor total <span class="stat-icon">R$</span></div><div class="stat-value" id="statValue">R$ 0,00</div><div class="stat-note">Soma das notas cadastradas</div></div><div class="card"><div class="stat-top">Fornecedores <span class="stat-icon">♙</span></div><div class="stat-value" id="statSuppliers">0</div><div class="stat-note">Identificados nos XMLs</div></div><div class="card"><div class="stat-top">Itens de produtos <span class="stat-icon">▧</span></div><div class="stat-value" id="statProducts">0</div><div class="stat-note">Linhas de produtos importadas</div></div></div>
-<div class="panel"><div class="panel-head"><div><h2>Notas fiscais recentes</h2><p>Documentos importados nesta sessão</p></div><button class="btn" data-goto="invoices">Ver todas</button></div><div id="recentTable"></div></div></section>
+<div class="panel"><div class="panel-head"><div><h2>Notas fiscais recentes</h2><p>Documentos registrados na Central</p></div><button class="btn" data-goto="invoices">Ver todas</button></div><div id="recentTable"></div></div></section>
 <section class="page" id="page-invoices"><div class="heading"><div><div class="eyebrow">DOCUMENTOS</div><h1>Notas fiscais</h1><p>Consulte e filtre os documentos importados.</p></div><button class="btn primary" data-goto="import">＋ Importar XML</button></div><div class="panel"><div class="toolbar"><input class="field search" id="invoiceSearch" placeholder="Buscar por número, fornecedor, CNPJ ou chave..."><input class="field" type="date" id="dateFilter"><select class="field" id="invoiceSource"><option value="">Todas as origens</option><option value="SEFAZ">SEFAZ</option><option value="XML/ZIP">XML / ZIP</option><option value="manual">Manual</option></select><button class="btn" id="exportInvoicesBtn" type="button">↓ Exportar CSV</button></div><div id="invoiceTable"></div></div></section>
 <section class="page" id="page-history">
 <div class="heading"><div><div class="eyebrow">RECUPERAÇÃO FISCAL</div><h1>Histórico de notas</h1><p>Pesquise uma NF-e antiga pela chave de acesso e recupere o documento quando a SEFAZ disponibilizá-lo.</p></div></div>
@@ -118,7 +118,40 @@
 </div></main></div><div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
-const API_BASE_URL=window.COSTALOG_API_URL||"https://central-notas-fiscais-costalog-api.onrender.com";const AUTH_STORAGE_KEY="costalog_admin_token";let authToken=sessionStorage.getItem(AUTH_STORAGE_KEY)||"";let apiOnline=false;const state={invoices:[],products:[]};const $=id=>document.getElementById(id);const money=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});const digits=v=>(v||'').replace(/\D/g,'');const txt=(el,tag)=>{const n=el?.getElementsByTagName(tag)[0];return n?.textContent?.trim()||''};const all=(el,tag)=>Array.from(el?.getElementsByTagName(tag)||[]);
+const API_BASE_URL=window.COSTALOG_API_URL||"https://central-notas-fiscais-costalog-api.onrender.com";const AUTH_STORAGE_KEY="costalog_admin_token";let authToken=sessionStorage.getItem(AUTH_STORAGE_KEY)||"";let apiOnline=false;const state={invoices:[],products:[]};const $=id=>document.getElementById(id);
+function applyTheme(theme,persist=true){
+  const next=theme==='dark'?'dark':'light';
+  document.body.dataset.theme=next;
+  $('themeGlyph').textContent=next==='dark'?'☀':'☾';
+  $('themeToggle').title=next==='dark'?'Ativar modo claro':'Ativar modo escuro';
+  $('themeToggle').setAttribute('aria-label',$('themeToggle').title);
+  const meta=document.querySelector('meta[name="theme-color"]');
+  if(meta)meta.content=next==='dark'?'#0b1117':'#141c24';
+  if(persist){try{localStorage.setItem('costalog_theme',next);}catch(error){}}
+}
+let savedTheme='light';try{savedTheme=localStorage.getItem('costalog_theme')||'light';}catch(error){}
+applyTheme(savedTheme,false);
+$('themeToggle').addEventListener('click',()=>applyTheme(document.body.dataset.theme==='dark'?'light':'dark'));
+$('globalSearch').addEventListener('input',event=>{
+  const value=event.target.value;
+  if(!value.trim())return;
+  navigate('invoices');
+  $('invoiceSearch').value=value;
+  render();
+});
+window.addEventListener('keydown',event=>{
+  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){
+    event.preventDefault();
+    navigate('invoices');
+    $('globalSearch').focus();
+  }
+  if(event.key==='Escape'&&document.activeElement===$('globalSearch')){
+    $('globalSearch').value='';
+    $('invoiceSearch').value='';
+    render();
+    $('globalSearch').blur();
+  }
+});const money=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});const digits=v=>(v||'').replace(/\D/g,'');const txt=(el,tag)=>{const n=el?.getElementsByTagName(tag)[0];return n?.textContent?.trim()||''};const all=(el,tag)=>Array.from(el?.getElementsByTagName(tag)||[]);
 function get(el,tag){return txt(el,tag)}
 function parseInvoice(xml,fileName){
 const doc=new DOMParser().parseFromString(xml,'application/xml');
@@ -192,6 +225,7 @@ async function importFiles(files){
           throw Error('Formato não suportado. Use XML ou ZIP.');
         }
       }catch(error){
+        invalid++;
         errors.push(name+': '+error.message);
         resultRows.push({name,type:'error',label:'NÃO LIDO'});
       }
@@ -326,8 +360,8 @@ function formatDateTime(value){if(!value)return'—';const d=new Date(value);ret
 async function refreshSefazStatus(){
   const status=await apiRequest('/api/sefaz/status');
   $('overviewNoticeText').textContent=status.configured
-    ?'As notas importadas e as recebidas pela integração SEFAZ são armazenadas no PostgreSQL. A integração SEFAZ está habilitada e configurada no servidor. A primeira consulta ainda aguarda retorno da SEFAZ; até o momento, nenhum documento foi processado por essa integração. O acesso à Central é restrito a uma sessão administrativa autenticada.'
-    :'As notas importadas e as recebidas pela integração SEFAZ são armazenadas no PostgreSQL. A integração automática ainda aguarda a conclusão da configuração do certificado A1 e das credenciais no servidor. O acesso à Central é restrito a uma sessão administrativa autenticada.';
+    ?'Integração SEFAZ configurada. Último retorno: '+(status.lastStatus||'ainda não consultado')+' — '+(status.lastMessage||'Aguardando resposta do serviço fiscal')+'.'
+    :'A integração automática aguarda a conclusão da configuração segura do certificado A1 e das credenciais no servidor.';
   $('sefazPill').textContent=status.configured?'Integração configurada':'Aguardando certificado';
   $('sefazPill').className='pill'+(status.configured?' green':'');
   $('sefazMessage').textContent=status.configured?(status.lastMessage||'Integração pronta para consultar a SEFAZ.'):'A consulta automática ainda aguarda o novo certificado A1 e os segredos do Render/GitHub.';
@@ -351,11 +385,18 @@ state.invoices=Array.isArray(saved)?saved:[];
 apiOnline=true;
 await refreshSefazStatus().catch(error=>console.warn('Status SEFAZ indisponível:',error));
 $('apiStatus').textContent='Banco conectado';
-$('apiStatus').className='pill green';
+$('apiStatus').className='api-pill green';
+$('sidebarStatus').textContent='Ambiente conectado';
+$('sidebarStatusDot').style.background='var(--green)';
+$('sidebarStatusDot').style.boxShadow='0 0 0 4px color-mix(in srgb,var(--green) 18%,transparent)';
+$('dashboardUpdated').textContent='Atualizado em '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
 }catch(error){
 apiOnline=false;
-$('apiStatus').textContent='Modo local';
-$('apiStatus').className='pill';
+$('apiStatus').textContent='API indisponível';
+$('apiStatus').className='api-pill';
+$('sidebarStatus').textContent='API indisponível';
+$('sidebarStatusDot').style.background='var(--amber)';
+$('sidebarStatusDot').style.boxShadow='0 0 0 4px color-mix(in srgb,var(--amber) 18%,transparent)';
 $('apiStatus').title='Falha ao conectar à API: '+(error?.message||'erro desconhecido')+'. Verifique o Render, /health e o CORS.';
 console.error('Central Costalog: falha na conexão com a API.',error);
 }
@@ -398,7 +439,7 @@ $('loginForm').addEventListener('submit',async event=>{
     $('loginError').textContent=error.message||'Não foi possível entrar. Verifique suas credenciais.';
   }finally{
     button.disabled=false;
-    button.textContent='Entrar na Central';
+    button.innerHTML='Acessar plataforma <span aria-hidden="true">→</span>';
   }
 });
 $('logoutBtn').addEventListener('click',()=>{
