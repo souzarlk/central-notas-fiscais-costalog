@@ -236,3 +236,7 @@ td .strong{color:var(--ink);font-weight:760}
 #resetInvoiceFilters{min-height:39px}
 #dateFromFilter,#dateToFilter{min-width:135px}
 @media(max-width:720px){.drop .drop-actions{flex-direction:column;gap:8px}.drop .drop-actions .btn{width:100%}}
+
+.import-actions{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:13px}
+.import-actions>span{color:var(--muted);font-size:9px}
+@media(max-width:720px){.import-actions{align-items:stretch;flex-direction:column}.import-actions .btn{width:100%}}
