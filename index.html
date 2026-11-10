@@ -130,7 +130,7 @@
 </div></main></div><div class="toast" id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'"></script>
 <script>
-const API_BASE_URL=window.COSTALOG_API_URL||"https://central-notas-fiscais-costalog-api.onrender.com";const AUTH_STORAGE_KEY="costalog_admin_token";let authToken=sessionStorage.getItem(AUTH_STORAGE_KEY)||"";let apiOnline=false;const state={invoices:[],products:[]};const $=id=>document.getElementById(id);
+const API_BASE_URL=window.COSTALOG_API_URL||"https://central-notas-fiscais-costalog-api.onrender.com";const AUTH_STORAGE_KEY="costalog_admin_token";let authToken=sessionStorage.getItem(AUTH_STORAGE_KEY)||"";let apiOnline=false;const state={invoices:[],products:[],documents:[]};const $=id=>document.getElementById(id);
 function applyTheme(theme,persist=true){
   const next=theme==='dark'?'dark':'light';
   document.body.dataset.theme=next;
@@ -183,6 +183,49 @@ const key=(inf.getAttribute('Id')||'').replace(/^NFe/,'');
 if(!/^\d{44}$/.test(key))throw Error('NF-e sem chave de acesso válida de 44 dígitos.');
 return{id:'local-'+Date.now()+'-'+Math.random().toString(16).slice(2),key,number:get(ide,'nNF'),series:get(ide,'serie'),date:get(ide,'dhEmi')||get(ide,'dEmi'),supplier:get(emit,'xNome')||'Fornecedor não identificado',supplierCnpj:get(emit,'CNPJ')||get(emit,'CPF'),destCnpj:get(dest,'CNPJ')||get(dest,'CPF'),total:Number(get(total,'vNF')||0),products,payment:pays.join('; ')||'Não informado no XML',fileName,protocol:get(doc,'nProt'),status:get(doc,'cStat')==='100'?'Autorizada':'Importada'};
 }
+
+function parseFiscalXml(xml,fileName){
+  const doc=new DOMParser().parseFromString(xml,'application/xml');
+  if(doc.querySelector('parsererror'))throw Error('XML inválido ou malformado');
+  const elements=Array.from(doc.getElementsByTagName('*'));
+  const lname=node=>String(node?.localName||node?.nodeName?.split(':').pop()||'').toLowerCase();
+  const first=(root,name)=>Array.from(root?.getElementsByTagName('*')||[]).find(node=>lname(node)===String(name).toLowerCase())||null;
+  const value=(root,...names)=>{
+    for(const name of names){const node=first(root,name);if(node?.textContent?.trim())return node.textContent.trim();}
+    return '';
+  };
+  const attr=(node,name)=>String(node?.getAttribute?.(name)||'').trim();
+  const identifyKey=node=>attr(node,'Id').replace(/^(NFe|CTe|MDFe|CFe)/i,'').replace(/[^0-9A-Za-z]/g,'');
+  const nfe=first(doc,'infNFe'),summary=first(doc,'resNFe');
+  if(nfe||summary){
+    const data=parseInvoice(xml,fileName);
+    const model=value(nfe||summary,'mod')||(data.key||'').slice(20,22);
+    if(model==='55')return{kind:'invoice',data};
+    return{kind:'document',data:{type:'NFCE',key:data.key,number:data.number,series:data.series,date:data.date,issuer:data.supplier,issuerDocument:data.supplierCnpj,recipient:'',recipientDocument:data.destCnpj,total:data.total,status:data.status,fileName,rawXml:xml,details:{model:'65',sourceTag:nfe?'infNFe':'resNFe'}}};
+  }
+  const cte=first(doc,'infCte');
+  if(cte){
+    const ide=first(cte,'ide'),emit=first(cte,'emit'),rem=first(cte,'rem'),dest=first(cte,'dest'),prest=first(cte,'vPrest');
+    return{kind:'document',data:{type:'CTE',key:identifyKey(cte),number:value(ide,'nCT'),series:value(ide,'serie'),date:value(ide,'dhEmi','dEmi'),issuer:value(emit,'xNome'),issuerDocument:value(emit,'CNPJ','CPF'),recipient:value(dest,'xNome')||value(rem,'xNome'),recipientDocument:value(dest,'CNPJ','CPF')||value(rem,'CNPJ','CPF'),total:Number(value(prest,'vTPrest','vRec')||0),status:value(first(doc,'infProt'),'cStat')==='100'?'Autorizado':'Importado',fileName,rawXml:xml,details:{model:'57',cfop:value(ide,'CFOP'),tomador:value(first(cte,'toma3')||first(cte,'toma4'),'toma')}}};
+  }
+  const mdfe=first(doc,'infMDFe');
+  if(mdfe){
+    const ide=first(mdfe,'ide'),emit=first(mdfe,'emit'),tot=first(mdfe,'tot');
+    return{kind:'document',data:{type:'MDFE',key:identifyKey(mdfe),number:value(ide,'nMDF'),series:value(ide,'serie'),date:value(ide,'dhEmi'),issuer:value(emit,'xNome'),issuerDocument:value(emit,'CNPJ','CPF'),recipient:'',recipientDocument:'',total:Number(value(tot,'vCarga')||0),status:value(first(doc,'infProt'),'cStat')==='100'?'Autorizado':'Importado',fileName,rawXml:xml,details:{model:'58',qNFe:value(tot,'qNFe'),qCTe:value(tot,'qCTe')}}};
+  }
+  const cfe=first(doc,'infCFe');
+  if(cfe){
+    const ide=first(cfe,'ide'),emit=first(cfe,'emit'),dest=first(cfe,'dest'),tot=first(cfe,'ICMSTot')||first(cfe,'total');
+    return{kind:'document',data:{type:'CFE_SAT',key:identifyKey(cfe),number:value(ide,'nCFe'),series:value(ide,'serie'),date:value(ide,'dEmi','dhEmi'),issuer:value(emit,'xNome'),issuerDocument:value(emit,'CNPJ','CPF'),recipient:value(dest,'xNome'),recipientDocument:value(dest,'CNPJ','CPF'),total:Number(value(tot,'vCFe','vNF')||0),status:'Importado',fileName,rawXml:xml,details:{model:'59'}}};
+  }
+  const nfse=first(doc,'InfNfse')||first(doc,'infNfse');
+  if(nfse){
+    const prest=first(nfse,'PrestadorServico')||first(nfse,'Prestador'),tom=first(nfse,'TomadorServico')||first(nfse,'Tomador'),ident=first(prest,'IdentificacaoPrestador')||prest,vals=first(nfse,'ValoresNfse')||first(nfse,'Servico');
+    return{kind:'document',data:{type:'NFSE',key:attr(nfse,'Id'),number:value(nfse,'Numero','NumeroNfse','NumeroNota'),series:value(nfse,'Serie'),date:value(nfse,'DataEmissao','Competencia'),issuer:value(prest,'RazaoSocial','NomeRazaoSocial','Nome'),issuerDocument:value(ident,'Cnpj','Cpf','CNPJ','CPF'),recipient:value(tom,'RazaoSocial','NomeRazaoSocial','Nome'),recipientDocument:value(tom,'Cnpj','Cpf','CNPJ','CPF'),total:Number(value(vals,'ValorLiquidoNfse','ValorServicos','ValorLiquido')||0),status:'Importado',fileName,rawXml:xml,details:{layout:'NFS-e',municipio:value(nfse,'CodigoMunicipio','MunicipioIncidencia')}}};
+  }
+  throw Error('Tipo de documento não reconhecido. São aceitos NF-e, NFS-e, CT-e, CF-e SAT, NFC-e e MDF-e.');
+}
+
 let importBusy=false;
 function updateImportProgress(label,percent,filesRead,imported,issues){
   $('importProgressWrap').hidden=false;
@@ -247,19 +290,32 @@ async function importFiles(files){
     }
     if(!xmlFiles.length)throw Error(errors.join(' | ')||'Nenhum XML encontrado nos arquivos selecionados.');
     if(xmlFiles.length>500)throw Error('O lote ultrapassou 500 XMLs. Divida a importação.');
-    const parsed=[],knownKeys=new Set(state.invoices.map(item=>digits(item.key||item.accessKey)).filter(key=>key.length===44));
+    const parsed=[],genericParsed=[],knownKeys=new Set(state.invoices.map(item=>digits(item.key||item.accessKey)).filter(key=>key.length===44)),knownGenericKeys=new Set((state.documents||[]).map(item=>String(item.type||'')+'|'+String(item.key||'')));
     for(let index=0;index<xmlFiles.length;index++){
       const item=xmlFiles[index];
       try{
-        const data=parseInvoice(item.text,item.name),key=digits(data.key);
-        if(key.length!==44)throw Error('Chave de acesso inválida.');
-        if(knownKeys.has(key)){
-          duplicates++;
-          resultRows.push({name:item.name,type:'warn',label:'JÁ CADASTRADA'});
+        const extracted=parseFiscalXml(item.text,item.name);
+        if(extracted.kind==='invoice'){
+          const data=extracted.data,key=digits(data.key);
+          if(key.length!==44)throw Error('Chave de acesso inválida.');
+          if(knownKeys.has(key)){
+            duplicates++;
+            resultRows.push({name:item.name,type:'warn',label:'JÁ CADASTRADA'});
+          }else{
+            knownKeys.add(key);
+            parsed.push(data);
+            resultRows.push({name:item.name,type:'ok',label:'NF-e VALIDADA'});
+          }
         }else{
-          knownKeys.add(key);
-          parsed.push(data);
-          resultRows.push({name:item.name,type:'ok',label:'XML VALIDADO'});
+          const data=extracted.data,identity=String(data.type||'')+'|'+String(data.key||item.name);
+          if(knownGenericKeys.has(identity)){
+            duplicates++;
+            resultRows.push({name:item.name,type:'warn',label:'JÁ CADASTRADO'});
+          }else{
+            knownGenericKeys.add(identity);
+            genericParsed.push(data);
+            resultRows.push({name:item.name,type:'ok',label:data.type+' VALIDADO'});
+          }
         }
       }catch(error){
         invalid++;
@@ -270,15 +326,15 @@ async function importFiles(files){
       if(index%8===0)renderImportResults(resultRows);
     }
     renderImportResults(resultRows);
-    if(!parsed.length){
+    if(!parsed.length&&!genericParsed.length){
       updateImportProgress('Validação concluída — nenhum documento novo para gravar.',100,readCount,0,duplicates+invalid);
       $('importFeedback').textContent='Foram identificados '+duplicates+' documento(s) já cadastrado(s) e '+invalid+' arquivo(s) inválido(s). Nenhuma nova nota precisou ser gravada.';
       return;
     }
-    const chunks=[];
-    for(let start=0;start<parsed.length;start+=50)chunks.push(parsed.slice(start,start+50));
-    for(let index=0;index<chunks.length;index++){
-      const result=await apiRequest('/api/invoices/import-batch',{method:'POST',body:JSON.stringify({invoices:chunks[index]})});
+    const invoiceChunks=[];
+    for(let start=0;start<parsed.length;start+=50)invoiceChunks.push(parsed.slice(start,start+50));
+    for(let index=0;index<invoiceChunks.length;index++){
+      const result=await apiRequest('/api/invoices/import-batch',{method:'POST',body:JSON.stringify({invoices:invoiceChunks[index]})});
       imported+=Number(result.imported||0);
       duplicates+=Number(result.duplicates||0);
       invalid+=Number(result.invalid||0);
@@ -286,18 +342,32 @@ async function importFiles(files){
         errors.push((item.fileName||'Arquivo')+': '+item.reason);
         resultRows.push({name:item.fileName||'Documento',type:'error',label:'NÃO GRAVADO'});
       });
-      updateImportProgress('Gravando lote '+(index+1)+' de '+chunks.length+' no banco...',53+((index+1)/chunks.length)*40,readCount,imported,duplicates+invalid);
+      updateImportProgress('Gravando NF-e no banco...',53+((index+1)/Math.max(1,invoiceChunks.length+genericParsed.length/2))*40,readCount,imported,duplicates+invalid);
+      renderImportResults(resultRows);
+    }
+    for(let start=0;start<genericParsed.length;start+=2){
+      const batch=genericParsed.slice(start,start+2);
+      const result=await apiRequest('/api/fiscal-documents/import-batch',{method:'POST',body:JSON.stringify({documents:batch})});
+      imported+=Number(result.imported||0);
+      duplicates+=Number(result.duplicates||0);
+      invalid+=Number(result.invalid||0);
+      (result.errors||[]).forEach(item=>{
+        errors.push((item.fileName||'Arquivo')+': '+item.reason);
+        resultRows.push({name:item.fileName||'Documento',type:'error',label:'NÃO GRAVADO'});
+      });
+      updateImportProgress('Gravando documentos fiscais no banco...',53+((start+batch.length)/Math.max(1,parsed.length+genericParsed.length))*40,readCount,imported,duplicates+invalid);
       renderImportResults(resultRows);
     }
     const saved=await apiRequest('/api/invoices');
     state.invoices=Array.isArray(saved)?saved:[];
+    state.documents=await apiRequest('/api/fiscal-documents').catch(()=>[]);
     render();
     updateImportProgress('Importação finalizada e banco atualizado.',100,readCount,imported,duplicates+invalid);
     resultRows.forEach(item=>{if(item.label==='XML VALIDADO')item.label='PROCESSADO';});
     if(duplicates)resultRows.push({name:'Resumo do lote',type:'warn',label:duplicates+' DUPLICADA(S)'});
     if(imported)resultRows.push({name:'Resumo do lote',type:'ok',label:imported+' GRAVADA(S)'});
     renderImportResults(resultRows);
-    const message=xmlFiles.length+' XML(s) analisado(s): '+imported+' nota(s) gravada(s), '+duplicates+' duplicada(s), '+invalid+' inválida(s).';
+    const message=xmlFiles.length+' XML(s) analisado(s): '+imported+' documento(s) gravado(s), '+duplicates+' duplicado(s), '+invalid+' inválido(s).';
     $('importFeedback').textContent=message+(errors.length?' '+errors.slice(0,12).join(' | '):'');
     if(imported)toast(imported+' NF-e(s) gravada(s) no Neon');
     else toast('Leitura concluída: nenhum documento novo');
