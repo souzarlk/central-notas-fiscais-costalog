@@ -120,6 +120,8 @@ async function importFiles(files){
     const entries=Object.values(zip.files).filter(entry=>!entry.dir&&entry.name.toLowerCase().endsWith('.xml'));
     if(!entries.length)throw Error('O ZIP não contém arquivos XML.');
     if(entries.length>500)throw Error('O ZIP contém mais de 500 XMLs. Divida o arquivo em partes menores.');
+    const expandedSize=entries.reduce((sum,entry)=>sum+Number(entry._data?.uncompressedSize||0),0);
+    if(expandedSize>50*1024*1024)throw Error('O conteúdo descompactado ultrapassa 50 MB. Divida o arquivo ZIP em partes menores.');
     for(const entry of entries)xmlFiles.push({name:file.name+' / '+entry.name,text:await entry.async('string')});
    }else errors.push(file.name+': formato não suportado.');
   }catch(error){errors.push(file.name+': '+error.message)}
