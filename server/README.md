@@ -7,6 +7,7 @@ API Node.js + Express + PostgreSQL (Neon), com autenticação administrativa e i
 - GET /health — saúde da API e conexão ao banco; pública, sem dados fiscais.
 - POST /api/auth/login e GET /api/auth/me — autenticação administrativa.
 - GET /api/invoices, POST /api/invoices, POST /api/invoices/import-batch — NF-e, consulta e importação em lote.
+- GET /api/invoices/:id/xml — download do XML original de NF-e armazenado.
 - GET /api/invoices/export.csv — exportação de NF-e.
 - GET /api/fiscal-documents — documentos fiscais por tipo.
 - POST /api/fiscal-documents/import-batch — importação de XMLs de NFS-e, CT-e, CT-e OS, CF-e SAT, NFC-e e MDF-e.
@@ -20,7 +21,7 @@ As rotas de dados exigem Authorization: Bearer com sessão administrativa, excet
 
 ## Estrutura de dados
 
-- invoices e invoice_products: NF-e completas e itens extraídos.
+- invoices e invoice_products: NF-e completas, itens extraídos e XML original das novas importações/consultas SEFAZ.
 - suppliers: cadastro consolidado de emitentes.
 - fiscal_documents: documentos fiscais adicionais, com XML original protegido e detalhes estruturados.
 - workspace_records: registros de contas, boletos, pedidos, negociações, automações e etapas documentais.
