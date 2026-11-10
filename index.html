@@ -371,7 +371,7 @@ async function importFiles(files){
     renderImportResults(resultRows);
     const message=xmlFiles.length+' XML(s) analisado(s): '+imported+' documento(s) gravado(s), '+duplicates+' duplicado(s), '+invalid+' inválido(s).';
     $('importFeedback').textContent=message+(errors.length?' '+errors.slice(0,12).join(' | '):'');
-    if(imported)toast(imported+' NF-e(s) gravada(s) no Neon');
+    if(imported)toast(imported+' documento(s) fiscal(is) gravado(s) no Neon');
     else toast('Leitura concluída: nenhum documento novo');
   }catch(error){
     updateImportProgress('Importação interrompida.',100,readCount,imported,duplicates+invalid+errors.length);
@@ -679,7 +679,7 @@ function wDocTable(rows,isInvoice){
  return '<div class="feature-table-wrap"><table class="feature-table"><thead><tr><th>Número / Série</th><th>Emitente</th><th>Emissão</th><th>Valor</th><th>Situação</th><th>Origem</th><th></th></tr></thead><tbody>'+html+'</tbody></table></div>';
 }
 async function renderDocuments(type){
- const labels=[['NFE','NF-e'],['NFSE','NFS-e'],['CTE','CT-e'],['CFE_SAT','CF-e SAT'],['NFCE','NFC-e'],['MDFE','MDF-e']];
+ const labels=[['NFE','NF-e'],['NFSE','NFS-e'],['CTE','CT-e'],['CTE_OS','CT-e OS'],['CFE_SAT','CF-e SAT'],['NFCE','NFC-e'],['MDFE','MDF-e']];
  const current=type||workspaceState.docType||'NFE';workspaceState.docType=current;
  const generic=await getFiscalDocuments(current);
  const isInvoice=current==='NFE';
@@ -839,7 +839,7 @@ async function uploadWorkspaceCapture(){
   let imported=0,duplicates=0,invalid=0;
   for(let i=0;i<invoices.length;i+=50){const r=await apiRequest('/api/invoices/import-batch',{method:'POST',body:JSON.stringify({invoices:invoices.slice(i,i+50)})});imported+=Number(r.imported||0);duplicates+=Number(r.duplicates||0);invalid+=Number(r.invalid||0);}
   for(let i=0;i<documents.length;i+=2){const r=await apiRequest('/api/fiscal-documents/import-batch',{method:'POST',body:JSON.stringify({documents:documents.slice(i,i+2)})});imported+=Number(r.imported||0);duplicates+=Number(r.duplicates||0);invalid+=Number(r.invalid||0);}
-  state.invoices=await apiRequest('/api/invoices');state.documents=await apiRequest('/api/fiscal-documents');workspaceState.documents=state.documents;workspaceState.documentsLoaded=true;render();
+  state.invoices=await apiRequest('/api/invoices');state.documents=await apiRequest('/api/fiscal-documents');workspaceState.documents=state.documents;workspaceState.documentsLoaded=true;clearWorkspaceCaches();render();
   feedback.textContent=xmlFiles.length+' XML(s) analisado(s): '+imported+' gravado(s), '+duplicates+' duplicado(s), '+invalid+' inválido(s). '+errors.slice(0,6).join(' | ');
   toast(imported+' documento(s) importado(s)');
   if(workspaceState.feature==='documents'||workspaceState.feature.startsWith('doc-'))renderWorkspaceFeature();
