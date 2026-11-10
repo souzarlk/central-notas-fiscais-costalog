@@ -281,6 +281,10 @@ async function importFiles(files){
     state.invoices=Array.isArray(saved)?saved:[];
     render();
     updateImportProgress('Importação finalizada e banco atualizado.',100,readCount,imported,duplicates+invalid);
+    resultRows.forEach(item=>{if(item.label==='XML VALIDADO')item.label='PROCESSADO';});
+    if(duplicates)resultRows.push({name:'Resumo do lote',type:'warn',label:duplicates+' DUPLICADA(S)'});
+    if(imported)resultRows.push({name:'Resumo do lote',type:'ok',label:imported+' GRAVADA(S)'});
+    renderImportResults(resultRows);
     const message=xmlFiles.length+' XML(s) analisado(s): '+imported+' nota(s) gravada(s), '+duplicates+' duplicada(s), '+invalid+' inválida(s).';
     $('importFeedback').textContent=message+(errors.length?' '+errors.slice(0,12).join(' | '):'');
     if(imported)toast(imported+' NF-e(s) gravada(s) no Neon');
@@ -300,7 +304,7 @@ function table(headers,rows,empty){if(!rows.length)return '<div class="empty"><d
 function invoiceRows(items){return items.map(n=>'<tr><td><span class="strong">NF '+esc(n.number||'—')+'</span><div class="muted">Série '+esc(n.series||'—')+'</div></td><td><span class="strong">'+esc(n.supplier)+'</span><div class="muted">'+esc(n.supplierCnpj)+'</div></td><td>'+esc(formatDate(n.date))+'</td><td class="strong">'+money(n.total)+'</td><td><span class="pill green">● '+esc(n.status)+'</span></td><td>'+esc(n.source||'manual')+'</td><td><button class="btn" data-detail="'+esc(n.id??n.key)+'">Detalhes</button></td></tr>')}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function formatDate(s){if(!s)return'—';const d=new Date(s);return isNaN(d)?s:d.toLocaleDateString('pt-BR')}
-function render(){const inv=state.invoices,prods=inv.flatMap(n=>n.products.map(p=>({...p,supplier:n.supplier,number:n.number})));$('statInvoices').textContent=inv.length;$('statValue').textContent=money(inv.reduce((a,n)=>a+Number(n.total||0),0));$('statSuppliers').textContent=new Set(inv.map(n=>n.supplierCnpj||n.supplier)).size;$('statProducts').textContent=prods.length;$('recentTable').innerHTML=table(['Nota','Fornecedor','Emissão','Valor total','Situação','Origem',''],invoiceRows(inv.slice(-5).reverse()),'Nenhuma nota importada');let search=($('invoiceSearch')?.value||'').toLowerCase(),date=$('dateFilter')?.value||'',source=$('invoiceSource')?.value||'';let filtered=inv.filter(n=>([n.number,n.supplier,n.supplierCnpj,n.key].join(' ').toLowerCase().includes(search))&&(!date||String(n.date||'').slice(0,10)===date)&&(!source||String(n.source||'manual')===source));$('invoiceTable').innerHTML=table(['Nota','Fornecedor','Emissão','Valor total','Situação','Origem',''],invoiceRows(filtered.slice().reverse()),'Nenhuma nota encontrada');let ps=($('productSearch')?.value||'').toLowerCase();$('productsTable').innerHTML=table(['Código','Descrição','Fornecedor','Qtd.','Unidade','Valor total'],prods.filter(p=>(p.description+' '+p.code+' '+p.supplier).toLowerCase().includes(ps)).map(p=>'<tr><td>'+esc(p.code)+'</td><td class="strong">'+esc(p.description)+'</td><td>'+esc(p.supplier)+'</td><td>'+Number(p.quantity||0).toLocaleString('pt-BR')+'</td><td>'+esc(p.unit)+'</td><td class="strong">'+money(p.total)+'</td></tr>'),'Nenhum produto identificado');const suppliers=[...new Map(inv.map(n=>[n.supplierCnpj||n.supplier,n])).values()];$('suppliersTable').innerHTML=table(['Fornecedor','CNPJ/CPF','Notas importadas','Total'],suppliers.map(s=>{const ns=inv.filter(n=>(n.supplierCnpj||n.supplier)===(s.supplierCnpj||s.supplier));return '<tr><td class="strong">'+esc(s.supplier)+'</td><td>'+esc(s.supplierCnpj)+'</td><td>'+ns.length+'</td><td class="strong">'+money(ns.reduce((a,n)=>a+Number(n.total||0),0))+'</td></tr>'}),'Nenhum fornecedor identificado')}
+function render(){const inv=state.invoices,prods=inv.flatMap(n=>n.products.map(p=>({...p,supplier:n.supplier,number:n.number})));$('statInvoices').textContent=inv.length;$('statValue').textContent=money(inv.reduce((a,n)=>a+Number(n.total||0),0));$('statSuppliers').textContent=new Set(inv.map(n=>n.supplierCnpj||n.supplier)).size;$('statProducts').textContent=prods.length;$('recentTable').innerHTML=table(['Nota','Fornecedor','Emissão','Valor total','Situação','Origem',''],invoiceRows(inv.slice(-5).reverse()),'Nenhuma nota importada');let search=($('invoiceSearch')?.value||'').toLowerCase(),dateFrom=$('dateFromFilter')?.value||'',dateTo=$('dateToFilter')?.value||'',source=$('invoiceSource')?.value||'',status=$('invoiceStatus')?.value||'';let filtered=inv.filter(n=>{const issued=String(n.date||'').slice(0,10);return [n.number,n.supplier,n.supplierCnpj,n.key].join(' ').toLowerCase().includes(search)&&(!dateFrom||issued>=dateFrom)&&(!dateTo||issued<=dateTo)&&(!source||String(n.source||'manual')===source)&&(!status||String(n.status||'').includes(status));});$('invoiceTable').innerHTML=table(['Nota','Fornecedor','Emissão','Valor total','Situação','Origem',''],invoiceRows(filtered.slice().reverse()),'Nenhuma nota encontrada');let ps=($('productSearch')?.value||'').toLowerCase();$('productsTable').innerHTML=table(['Código','Descrição','Fornecedor','Qtd.','Unidade','Valor total'],prods.filter(p=>(p.description+' '+p.code+' '+p.supplier).toLowerCase().includes(ps)).map(p=>'<tr><td>'+esc(p.code)+'</td><td class="strong">'+esc(p.description)+'</td><td>'+esc(p.supplier)+'</td><td>'+Number(p.quantity||0).toLocaleString('pt-BR')+'</td><td>'+esc(p.unit)+'</td><td class="strong">'+money(p.total)+'</td></tr>'),'Nenhum produto identificado');const suppliers=[...new Map(inv.map(n=>[n.supplierCnpj||n.supplier,n])).values()];$('suppliersTable').innerHTML=table(['Fornecedor','CNPJ/CPF','Notas importadas','Total'],suppliers.map(s=>{const ns=inv.filter(n=>(n.supplierCnpj||n.supplier)===(s.supplierCnpj||s.supplier));return '<tr><td class="strong">'+esc(s.supplier)+'</td><td>'+esc(s.supplierCnpj)+'</td><td>'+ns.length+'</td><td class="strong">'+money(ns.reduce((a,n)=>a+Number(n.total||0),0))+'</td></tr>'}),'Nenhum fornecedor identificado')}
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2800)}
 function navigate(page){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+page));document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('crumb').textContent=({overview:'Visão geral',invoices:'Notas fiscais',products:'Produtos',suppliers:'Fornecedores',import:'Importar XML',history:'Histórico / recuperação',settings:'Configurações'})[page]||page;$('sidebar').classList.remove('open');render()}
 document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));
@@ -313,7 +317,22 @@ $('drop').addEventListener('keydown',event=>{if(event.key==='Enter'||event.key==
 ['dragenter','dragover'].forEach(name=>$('drop').addEventListener(name,event=>{event.preventDefault();$('drop').classList.add('drag');}));
 ['dragleave'].forEach(name=>$('drop').addEventListener(name,event=>{if(!$('drop').contains(event.relatedTarget))$('drop').classList.remove('drag');}));
 $('drop').addEventListener('drop',event=>{event.preventDefault();$('drop').classList.remove('drag');if(event.dataTransfer?.files?.length)importFiles(event.dataTransfer.files);});
-$('invoiceSearch').addEventListener('input',render);$('dateFilter').addEventListener('change',render);$('productSearch').addEventListener('input',render);$('invoiceSource').addEventListener('change',render);
+$('invoiceSearch').addEventListener('input',render);
+['dateFromFilter','dateToFilter','invoiceSource','invoiceStatus'].forEach(id=>$(id).addEventListener('change',render));
+$('resetInvoiceFilters').addEventListener('click',()=>{
+  ['invoiceSearch','dateFromFilter','dateToFilter','invoiceSource','invoiceStatus'].forEach(id=>$(id).value='');
+  render();
+});
+$('productSearch').addEventListener('input',render);
+$('clearImportBtn').addEventListener('click',()=>{
+  if(importBusy)return;
+  $('xmlFiles').value='';
+  $('importProgressWrap').hidden=true;
+  $('importResults').innerHTML='';
+  $('importFeedback').textContent='Resultado limpo. Os documentos já gravados continuam disponíveis na lista de notas.';
+  $('importProgressBar').style.width='0%';
+  toast('Painel de importação limpo');
+});
 $('exportInvoicesBtn').addEventListener('click',async()=>{
  const button=$('exportInvoicesBtn');button.disabled=true;button.textContent='Preparando CSV...';
  try{
