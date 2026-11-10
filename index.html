@@ -86,10 +86,11 @@
         <div class="drop-icon"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V3m0 0L7 8m5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/></svg></div>
         <strong>Arraste e solte seus arquivos aqui</strong>
         <p>Importe NF-e completas, resumos em XML ou pacotes ZIP do seu sistema fiscal e da contabilidade.</p>
-        <div class="drop-actions"><button class="btn primary" id="chooseFilesBtn" type="button">Escolher arquivos</button><span class="muted" style="font-size:9px">ou clique nesta área</span></div>
+        <div class="drop-actions"><span class="muted" style="font-size:9px">Solte os arquivos nesta área ou use o seletor abaixo.</span></div>
         <div class="drop-hint">FORMATOS ACEITOS: .XML E .ZIP · ATÉ 500 XMLs POR ZIP · ATÉ 50 MB DESCOMPACTADOS</div>
         <input class="file-input" type="file" id="xmlFiles" accept=".xml,.zip,text/xml,application/xml,application/zip" multiple aria-label="Selecionar arquivos para importação">
       </div>
+      <div class="import-actions"><button class="btn primary" id="chooseFilesBtn" type="button">Escolher arquivos</button><span>Selecione vários XMLs ou pacotes ZIP</span></div>
       <div class="import-progress" id="importProgressWrap" hidden>
         <div class="progress-head"><span id="importProgressText">Preparando documentos...</span><b id="importProgressPercent">0%</b></div>
         <div class="progress-track"><span id="importProgressBar"></span></div>
