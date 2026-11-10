@@ -15,8 +15,8 @@ const num=v=>{const n=Number(textOf(v).replace(',','.'));return Number.isFinite(
 function getConfig(){const certPath=process.env.SEFAZ_CERT_PATH||'',certBase64=String(process.env.SEFAZ_CERT_BASE64||'').replace(/\s/g,''),password=process.env.SEFAZ_CERT_PASSWORD||'',cnpj=cleanId(process.env.SEFAZ_CNPJ||''),enabled=String(process.env.SEFAZ_ENABLED||'false').toLowerCase()==='true',tpAmb=String(process.env.SEFAZ_TP_AMB||'1'),certificateFileConfigured=!!(certPath&&fs.existsSync(certPath)),certificateBase64Configured=!!certBase64,certificateConfigured=certificateFileConfigured||certificateBase64Configured;return{enabled,certificateFileConfigured,certificateBase64Configured,certificateConfigured,certificatePasswordConfigured:!!password,cnpjConfigured:cnpj.length===14,syncTokenConfigured:!!process.env.COSTALOG_SYNC_TOKEN,cnpj,certPath,certBase64,password,url:process.env.SEFAZ_DISTRIBUTION_URL||DEFAULT_URL,tpAmb,cUfAutor:String(process.env.SEFAZ_CUFAUTOR||'35'),configured:enabled&&certificateConfigured&&!!password&&cnpj.length===14&&tpAmb==='1'};}
 function buildKeyRequest(c,key){
   const cnpj=c.cnpj.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  const accessKey=String(key||'').replace(/\\D/g,'');
-  if(!/^\\d{44}$/.test(accessKey))throw Error('A chave de acesso deve conter exatamente 44 números.');
+  const accessKey=String(key||'').replace(/\D/g,'');
+  if(!/^\d{44}$/.test(accessKey))throw Error('A chave de acesso deve conter exatamente 44 números.');
   return '<?xml version="1.0" encoding="UTF-8"?>'
     +'<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="'+SOAP+'"><soap:Header/><soap:Body>'
     +'<nfeDistDFeInteresse xmlns="'+WSDL+'"><nfeDadosMsg xmlns="'+WSDL+'"><distDFeInt xmlns="'+NFE+'" versao="1.01">'
@@ -33,8 +33,8 @@ async function saveBatch(pool,docs,targetCnpj){const client=await pool.connect()
 async function lookupByKey(pool,key){
   const config=getConfig();
   if(!config.configured)throw Error('Integração SEFAZ ainda não está configurada.');
-  const accessKey=String(key||'').replace(/\\D/g,'');
-  if(!/^\\d{44}$/.test(accessKey))throw Error('A chave de acesso deve conter exatamente 44 números.');
+  const accessKey=String(key||'').replace(/\D/g,'');
+  if(!/^\d{44}$/.test(accessKey))throw Error('A chave de acesso deve conter exatamente 44 números.');
   const already=await pool.query('SELECT id,invoice_number,supplier_name,status FROM invoices WHERE access_key=$1',[accessKey]);
   if(already.rows.length)return{alreadyRegistered:true,invoice:already.rows[0],message:'Esta NF-e já está registrada na Central.'};
   const client=await pool.connect();
