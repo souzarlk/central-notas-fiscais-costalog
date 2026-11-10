@@ -22,6 +22,15 @@ test('parseResponse identifica cStat 137 sem documentos', () => {
   assert.deepEqual(result.docs, []);
 });
 
+test('parseResponse não inventa maxNSU quando a rejeição 656 não o informa', () => {
+  const xml = '<retDistDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01"><tpAmb>1</tpAmb><cStat>656</cStat><xMotivo>Consumo Indevido</xMotivo><ultNSU>000000000369285</ultNSU></retDistDFeInt>';
+  const result = parseResponse(xml);
+  assert.equal(result.status, '656');
+  assert.equal(result.ultNsu, '000000000369285');
+  assert.equal(result.maxNsu, null);
+  assert.deepEqual(result.docs, []);
+});
+
 test('parseInvoice interpreta resumo de NF-e recebido pela distribuição', () => {
   const key = '35261113824759000130550010000012341000012345';
   const xml = '<resNFe xmlns="http://www.portalfiscal.inf.br/nfe"><chNFe>' + key + '</chNFe><CNPJ>11222333000144</CNPJ><xNome>Fornecedor Teste</xNome><vNF>123.45</vNF><dhEmi>2026-11-09T10:00:00-03:00</dhEmi></resNFe>';
