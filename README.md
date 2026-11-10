@@ -32,7 +32,8 @@ Plataforma interna da Costalog para organizar documentos fiscais, compras, forne
 ## Importação e armazenamento
 
 - Importação de XML/ZIP.
-- A NF-e é registrada na estrutura de notas e itens.
+- A NF-e é registrada na estrutura de notas e itens; novas importações por XML e consultas SEFAZ conservam o XML original para download autenticado.
+- NF-e antigas cadastradas antes da guarda do XML só terão o arquivo disponível após reimportação do XML original.
 - NFS-e, CT-e, CT-e OS, CF-e SAT, NFC-e e MDF-e reconhecidos são registrados em tabela própria, mantendo o XML original para download autenticado.
 - Duplicidade é controlada pela chave do documento ou hash do XML quando o leiaute não fornece chave.
 - O sistema não inventa dados ausentes no XML.
