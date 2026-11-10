@@ -60,6 +60,7 @@
 <div class="nav-label">GESTÃO FISCAL</div><nav class="nav">
 <button class="active" data-page="overview"><span class="ico">▦</span>Visão geral</button>
 <button data-page="invoices"><span class="ico">▤</span>Notas fiscais</button>
+<button data-page="history"><span class="ico">↶</span>Histórico / recuperação</button>
 <button data-page="products"><span class="ico">▧</span>Produtos</button>
 <button data-page="suppliers"><span class="ico">♙</span>Fornecedores</button>
 </nav><div class="nav-label">SISTEMA</div><nav class="nav"><button data-page="import"><span class="ico">⇧</span>Importar XML</button><button data-page="settings"><span class="ico">⚙</span>Configurações</button></nav>
@@ -70,46 +71,95 @@
 <div class="notice"><b>Banco de dados conectado</b><span id="overviewNoticeText">Consultando a situação da integração SEFAZ...</span></div>
 <div class="cards"><div class="card"><div class="stat-top">Notas importadas <span class="stat-icon">▤</span></div><div class="stat-value" id="statInvoices">0</div><div class="stat-note">Banco de dados Costalog</div></div><div class="card"><div class="stat-top">Valor total <span class="stat-icon">R$</span></div><div class="stat-value" id="statValue">R$ 0,00</div><div class="stat-note">Soma das notas cadastradas</div></div><div class="card"><div class="stat-top">Fornecedores <span class="stat-icon">♙</span></div><div class="stat-value" id="statSuppliers">0</div><div class="stat-note">Identificados nos XMLs</div></div><div class="card"><div class="stat-top">Itens de produtos <span class="stat-icon">▧</span></div><div class="stat-value" id="statProducts">0</div><div class="stat-note">Linhas de produtos importadas</div></div></div>
 <div class="panel"><div class="panel-head"><div><h2>Notas fiscais recentes</h2><p>Documentos importados nesta sessão</p></div><button class="btn" data-goto="invoices">Ver todas</button></div><div id="recentTable"></div></div></section>
-<section class="page" id="page-invoices"><div class="heading"><div><div class="eyebrow">DOCUMENTOS</div><h1>Notas fiscais</h1><p>Consulte e filtre os documentos importados.</p></div><button class="btn primary" data-goto="import">＋ Importar XML</button></div><div class="panel"><div class="toolbar"><input class="field search" id="invoiceSearch" placeholder="Buscar por número, fornecedor ou CNPJ..."><input class="field" type="date" id="dateFilter"></div><div id="invoiceTable"></div></div></section>
+<section class="page" id="page-invoices"><div class="heading"><div><div class="eyebrow">DOCUMENTOS</div><h1>Notas fiscais</h1><p>Consulte e filtre os documentos importados.</p></div><button class="btn primary" data-goto="import">＋ Importar XML</button></div><div class="panel"><div class="toolbar"><input class="field search" id="invoiceSearch" placeholder="Buscar por número, fornecedor, CNPJ ou chave..."><input class="field" type="date" id="dateFilter"><select class="field" id="invoiceSource"><option value="">Todas as origens</option><option value="SEFAZ">SEFAZ</option><option value="XML/ZIP">XML / ZIP</option><option value="manual">Manual</option></select><button class="btn" id="exportInvoicesBtn" type="button">↓ Exportar CSV</button></div><div id="invoiceTable"></div></div></section>
+<section class="page" id="page-history">
+<div class="heading"><div><div class="eyebrow">RECUPERAÇÃO FISCAL</div><h1>Histórico de notas</h1><p>Pesquise uma NF-e antiga pela chave de acesso e recupere o documento quando a SEFAZ disponibilizá-lo.</p></div></div>
+<div class="notice"><b>Limites oficiais da SEFAZ</b>A consulta individual depende de o CNPJ estar vinculado à NF-e como destinatário, transportador ou terceiro autorizado. A recuperação pela distribuição é limitada a documentos recebidos nos últimos 90 dias. O sistema limita esta ferramenta a 15 consultas por hora para preservar margem em relação ao limite oficial.</div>
+<div class="panel"><div class="panel-head"><div><h2>Consultar NF-e pela chave de acesso</h2><p>Informe os 44 dígitos da chave de acesso da nota fiscal.</p></div><span class="pill">Consulta individual</span></div>
+<form id="historicLookupForm" class="toolbar"><input class="field search" id="historicKey" inputmode="numeric" maxlength="54" placeholder="Digite ou cole a chave de acesso (44 dígitos)" autocomplete="off" required><button class="btn primary" id="historicLookupBtn" type="submit">Consultar na SEFAZ</button></form>
+<div id="historicFeedback" style="padding:0 20px 18px;font-size:12px;color:var(--muted)"></div></div>
+<div class="panel"><div class="panel-head"><div><h2>Como recuperar um histórico maior</h2><p>Use a importação em lote para documentos já exportados pelo sistema fiscal ou contabilidade.</p></div><button class="btn primary" data-goto="import">Importar XML / ZIP</button></div><div style="padding:18px 20px;color:var(--muted);font-size:12px;line-height:1.9">A consulta por chave é pontual e não lista todas as notas por período. Para montar um histórico de meses ou anos anteriores, solicite os XMLs ao setor fiscal/contabilidade ou ao sistema emissor e importe vários arquivos de uma só vez. A busca automática por NSU continua responsável pelas novas notas disponibilizadas à Costalog.</div></div>
+</section>
 <section class="page" id="page-products"><div class="heading"><div><div class="eyebrow">ITENS</div><h1>Produtos</h1><p>Produtos identificados nos XMLs importados.</p></div></div><div class="panel"><div class="toolbar"><input class="field search" id="productSearch" placeholder="Buscar descrição, código ou fornecedor..."></div><div id="productsTable"></div></div></section>
 <section class="page" id="page-suppliers"><div class="heading"><div><div class="eyebrow">CADASTRO FISCAL</div><h1>Fornecedores</h1><p>Empresas emissoras encontradas nas notas.</p></div></div><div class="panel"><div id="suppliersTable"></div></div></section>
-<section class="page" id="page-import"><div class="heading"><div><div class="eyebrow">ENTRADA DE DOCUMENTOS</div><h1>Importar XML</h1><p>Adicione arquivos XML de NF-e para leitura automática.</p></div></div><div class="notice"><b>Importação de documentos</b>Com a API e o banco ativos, os dados estruturados da NF-e serão persistidos. O XML original não é armazenado nesta etapa. A gravação dos documentos exige uma sessão administrativa válida.</div><div class="panel"><div class="panel-head"><div><h2>Selecionar documentos</h2><p>Arquivos XML autorizados de NF-e (procNFe ou NFe)</p></div></div><div style="padding:20px"><label class="drop" id="drop"><div style="font-size:25px;color:var(--red)">⇧</div><strong>Arraste os arquivos XML até aqui</strong><p>ou clique para selecionar · Você pode importar vários arquivos</p><input type="file" id="xmlFiles" accept=".xml,text/xml,application/xml" multiple></label><div id="importFeedback" class="muted" style="font-size:12px;margin-top:14px"></div></div></div></section>
+<section class="page" id="page-import"><div class="heading"><div><div class="eyebrow">ENTRADA DE DOCUMENTOS</div><h1>Importar XML / ZIP</h1><p>Monte ou amplie o histórico fiscal com importação em massa.</p></div></div><div class="notice"><b>Importação em lote</b>É possível enviar XMLs individuais ou arquivos ZIP com vários XMLs. O sistema extrai os dados estruturados, grava notas e produtos no banco e ignora chaves já cadastradas. O XML original não é armazenado nesta etapa.</div><div class="panel"><div class="panel-head"><div><h2>Selecionar documentos</h2><p>Arquivos XML de NF-e ou ZIP contendo XMLs (procNFe, NFe ou resNFe)</p></div></div><div style="padding:20px"><label class="drop" id="drop"><div style="font-size:25px;color:var(--red)">⇧</div><strong>Arraste XMLs ou arquivos ZIP até aqui</strong><p>ou clique para selecionar · Vários arquivos por vez · Até 100 notas por lote enviado à API</p><input type="file" id="xmlFiles" accept=".xml,.zip,text/xml,application/xml,application/zip" multiple></label><div id="importFeedback" class="muted" style="font-size:12px;margin-top:14px"></div></div></div></section>
 <section class="page" id="page-settings"><div class="heading"><div><div class="eyebrow">ADMINISTRAÇÃO</div><h1>Configurações</h1><p>Acompanhe a integração automática de documentos fiscais.</p></div></div><div class="panel"><div class="panel-head"><div><h2>Distribuição DF-e da SEFAZ</h2><p id="sefazMessage">Consultando configuração da integração...</p></div><span id="sefazPill" class="pill">Verificando</span></div><div class="detail-grid"><div class="detail-item"><small>Tipo de consulta</small><strong>NF-e por NSU</strong></div><div class="detail-item"><small>Ambiente</small><strong>Produção</strong></div><div class="detail-item"><small>Certificado A1</small><strong id="sefazCertificate">Aguardando configuração segura</strong></div><div class="detail-item"><small>Agendamento</small><strong>Automático a cada hora</strong></div><div class="detail-item"><small>Última sincronização</small><strong id="sefazLastSync">—</strong></div><div class="detail-item"><small>Próxima consulta permitida</small><strong id="sefazNextSync">—</strong></div><div class="detail-item"><small>NSU atual / máximo</small><strong id="sefazNsu">000000000000000 / 000000000000000</strong></div><div class="detail-item"><small>Documentos processados</small><strong id="sefazDocs">0</strong></div></div><div style="padding:0 20px 18px"><button class="btn" id="sefazRefresh" type="button">↻ Atualizar situação</button><p id="sefazNote" class="muted" style="font-size:11px;margin:10px 0 0">O certificado A1 fica codificado em Base64 como variável secreta do Render; senha e certificado nunca são enviados ao site.</p></div></div><div class="panel"><div class="panel-head"><h2>Como a sincronização funciona</h2></div><div style="padding:18px 20px;color:var(--muted);font-size:12px;line-height:2">1. O GitHub Actions aciona a API uma vez por hora.<br>2. A API consulta a distribuição nacional da SEFAZ e continua do último NSU gravado no Neon.<br>3. Os documentos e notas são processados sem armazenar o XML original.<br>4. Resumos de NF-e podem aparecer antes do XML completo; a obtenção do XML completo exige manifestação do destinatário.<br>5. O sistema não realiza manifestação automaticamente.</div></div><div class="notice"><b>Segurança</b>As consultas e gravações de notas, produtos e fornecedores exigem autenticação administrativa. A rotina automática da SEFAZ utiliza credencial técnica própria.</div></section>
 </div></main></div><div class="toast" id="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script>
 const API_BASE_URL=window.COSTALOG_API_URL||"https://central-notas-fiscais-costalog-api.onrender.com";const AUTH_STORAGE_KEY="costalog_admin_token";let authToken=sessionStorage.getItem(AUTH_STORAGE_KEY)||"";let apiOnline=false;const state={invoices:[],products:[]};const $=id=>document.getElementById(id);const money=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});const digits=v=>(v||'').replace(/\D/g,'');const txt=(el,tag)=>{const n=el?.getElementsByTagName(tag)[0];return n?.textContent?.trim()||''};const all=(el,tag)=>Array.from(el?.getElementsByTagName(tag)||[]);
 function get(el,tag){return txt(el,tag)}
-function parseInvoice(xml,fileName){const doc=new DOMParser().parseFromString(xml,'application/xml');if(doc.querySelector('parsererror'))throw Error('XML inválido ou malformado');const inf=doc.getElementsByTagName('infNFe')[0];if(!inf)throw Error('Arquivo não contém infNFe (NF-e)');const ide=inf.getElementsByTagName('ide')[0],emit=inf.getElementsByTagName('emit')[0],dest=inf.getElementsByTagName('dest')[0],total=inf.getElementsByTagName('ICMSTot')[0];const products=all(inf,'det').map(d=>{const p=d.getElementsByTagName('prod')[0];return{code:get(p,'cProd'),description:get(p,'xProd'),ncm:get(p,'NCM'),cfop:get(p,'CFOP'),unit:get(p,'uCom'),quantity:Number(get(p,'qCom')||0),unitPrice:Number(get(p,'vUnCom')||0),total:Number(get(p,'vProd')||0)}});const pays=all(inf,'detPag').map(p=>{const t=get(p,'tPag');const names={'01':'Dinheiro','02':'Cheque','03':'Cartão de crédito','04':'Cartão de débito','05':'Crédito loja','10':'Vale alimentação','11':'Vale refeição','12':'Vale presente','13':'Vale combustível','15':'Boleto bancário','16':'Depósito bancário','17':'PIX','18':'Transferência','19':'Fidelidade','90':'Sem pagamento','99':'Outros'};return (names[t]||('Código '+t))+' — '+money(get(p,'vPag'))});const key=(inf.getAttribute('Id')||'').replace(/^NFe/,'');return{id:'local-'+Date.now()+'-'+Math.random().toString(16).slice(2),key:key||'Não informada',number:get(ide,'nNF'),series:get(ide,'serie'),date:get(ide,'dhEmi')||get(ide,'dEmi'),supplier:get(emit,'xNome')||'Fornecedor não identificado',supplierCnpj:get(emit,'CNPJ')||get(emit,'CPF'),destCnpj:get(dest,'CNPJ')||get(dest,'CPF'),total:Number(get(total,'vNF')||0),products,payment:pays.join('; ')||'Não informado no XML',fileName,protocol:get(doc,'nProt'),status:get(doc,'cStat')==='100'?'Autorizada':'Importada'};}
-async function importFiles(files){
-let ok=0,localOnly=0,errors=[];
-const tasks=Array.from(files).filter(f=>f.name.toLowerCase().endsWith('.xml'));
-if(!tasks.length){$('importFeedback').textContent='Selecione arquivos .xml.';return}
-await Promise.all(tasks.map(async f=>{
-try{
-const data=parseInvoice(await f.text(),f.name);
-if(data.key!=='Não informada'&&state.invoices.some(x=>x.key===data.key))throw Error('Nota já importada nesta sessão');
-if(apiOnline){
-const saved=await apiRequest('/api/invoices',{method:'POST',body:JSON.stringify(data)});
-state.invoices.push(saved.invoice||saved);
-}else{
-state.invoices.push(data);localOnly++;
+function parseInvoice(xml,fileName){
+const doc=new DOMParser().parseFromString(xml,'application/xml');
+if(doc.querySelector('parsererror'))throw Error('XML inválido ou malformado');
+const inf=doc.getElementsByTagName('infNFe')[0];
+const summary=doc.getElementsByTagName('resNFe')[0];
+if(!inf&&!summary)throw Error('Arquivo não contém uma NF-e reconhecida.');
+if(!inf&&summary){
+ const key=get(summary,'chNFe');
+ if(!/^\d{44}$/.test(key))throw Error('Resumo de NF-e sem chave de acesso válida.');
+ return{id:'local-'+Date.now()+'-'+Math.random().toString(16).slice(2),key,number:key.slice(25,34).replace(/^0+/,'')||'—',series:key.slice(22,25).replace(/^0+/,'')||'—',date:get(summary,'dhEmi'),supplier:get(summary,'xNome')||'Fornecedor não identificado',supplierCnpj:get(summary,'CNPJ')||get(summary,'CPF'),destCnpj:'',total:Number(get(summary,'vNF')||0),products:[],payment:'Não disponível no resumo SEFAZ',fileName,protocol:get(summary,'nProt'),status:'Resumo SEFAZ — manifestação pendente'};
 }
-ok++;
-}catch(e){errors.push(f.name+': '+e.message)}
-}));
-render();
-let message=ok+' arquivo(s) importado(s).';
-if(localOnly)message+=' '+localOnly+' salvo(s) somente nesta sessão, pois a API ainda não está conectada.';
-if(errors.length)message+=' Não importados: '+errors.join(' | ');
-$('importFeedback').textContent=message;
-if(ok)toast(ok+' nota(s) processada(s)');
-}function table(headers,rows,empty){if(!rows.length)return '<div class="empty"><div class="empty-icon">▤</div><strong>'+empty+'</strong><span>Importe arquivos XML para começar.</span></div>';return '<div class="table-wrap"><table><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>'}
+const ide=inf.getElementsByTagName('ide')[0],emit=inf.getElementsByTagName('emit')[0],dest=inf.getElementsByTagName('dest')[0],total=inf.getElementsByTagName('ICMSTot')[0];
+const products=all(inf,'det').map(d=>{const p=d.getElementsByTagName('prod')[0];return{code:get(p,'cProd'),description:get(p,'xProd'),ncm:get(p,'NCM'),cfop:get(p,'CFOP'),unit:get(p,'uCom'),quantity:Number(get(p,'qCom')||0),unitPrice:Number(get(p,'vUnCom')||0),total:Number(get(p,'vProd')||0)}});
+const pays=all(inf,'detPag').map(p=>{const t=get(p,'tPag');const names={'01':'Dinheiro','02':'Cheque','03':'Cartão de crédito','04':'Cartão de débito','05':'Crédito loja','10':'Vale alimentação','11':'Vale refeição','12':'Vale presente','13':'Vale combustível','15':'Boleto bancário','16':'Depósito bancário','17':'PIX','18':'Transferência','19':'Fidelidade','90':'Sem pagamento','99':'Outros'};return (names[t]||('Código '+t))+' — '+money(get(p,'vPag'))});
+const key=(inf.getAttribute('Id')||'').replace(/^NFe/,'');
+if(!/^\d{44}$/.test(key))throw Error('NF-e sem chave de acesso válida de 44 dígitos.');
+return{id:'local-'+Date.now()+'-'+Math.random().toString(16).slice(2),key,number:get(ide,'nNF'),series:get(ide,'serie'),date:get(ide,'dhEmi')||get(ide,'dEmi'),supplier:get(emit,'xNome')||'Fornecedor não identificado',supplierCnpj:get(emit,'CNPJ')||get(emit,'CPF'),destCnpj:get(dest,'CNPJ')||get(dest,'CPF'),total:Number(get(total,'vNF')||0),products,payment:pays.join('; ')||'Não informado no XML',fileName,protocol:get(doc,'nProt'),status:get(doc,'cStat')==='100'?'Autorizada':'Importada'};
+}
+async function importFiles(files){
+ const selected=Array.from(files||[]);
+ const xmlFiles=[],errors=[];
+ for(const file of selected){
+  const name=String(file.name||'arquivo').toLowerCase();
+  try{
+   if(name.endsWith('.xml'))xmlFiles.push({name:file.name,text:await file.text()});
+   else if(name.endsWith('.zip')){
+    if(!window.JSZip)throw Error('Biblioteca de leitura ZIP não carregou. Atualize a página e tente novamente.');
+    const zip=await JSZip.loadAsync(file);
+    const entries=Object.values(zip.files).filter(entry=>!entry.dir&&entry.name.toLowerCase().endsWith('.xml'));
+    if(!entries.length)throw Error('O ZIP não contém arquivos XML.');
+    if(entries.length>500)throw Error('O ZIP contém mais de 500 XMLs. Divida o arquivo em partes menores.');
+    for(const entry of entries)xmlFiles.push({name:file.name+' / '+entry.name,text:await entry.async('string')});
+   }else errors.push(file.name+': formato não suportado.');
+  }catch(error){errors.push(file.name+': '+error.message)}
+ }
+ if(!xmlFiles.length){$('importFeedback').textContent=errors.join(' | ')||'Selecione arquivos XML ou ZIP.';return}
+ const parsed=[];
+ for(const item of xmlFiles){
+  try{parsed.push(parseInvoice(item.text,item.name));}
+  catch(error){errors.push(item.name+': '+error.message);}
+ }
+ if(!parsed.length){$('importFeedback').textContent=errors.join(' | ')||'Nenhuma NF-e válida encontrada.';return}
+ let imported=0,duplicates=0,invalid=0,localOnly=0;
+ if(apiOnline){
+  for(let start=0;start<parsed.length;start+=50){
+   const chunk=parsed.slice(start,start+50);
+   try{
+    const result=await apiRequest('/api/invoices/import-batch',{method:'POST',body:JSON.stringify({invoices:chunk})});
+    imported+=result.imported||0;duplicates+=result.duplicates||0;invalid+=result.invalid||0;
+    (result.errors||[]).forEach(item=>errors.push((item.fileName||'Arquivo')+': '+item.reason));
+   }catch(error){invalid+=chunk.length;errors.push('Lote não gravado: '+error.message);}
+  }
+  const saved=await apiRequest('/api/invoices');
+  state.invoices=Array.isArray(saved)?saved:[];
+ }else{
+  state.invoices.push(...parsed);imported=parsed.length;localOnly=parsed.length;
+ }
+ render();
+ let message=xmlFiles.length+' XML(s) localizado(s). '+imported+' importado(s), '+duplicates+' duplicado(s), '+invalid+' inválido(s).';
+ if(localOnly)message+=' Os dados ficaram somente nesta sessão porque a API não está conectada.';
+ if(errors.length)message+=' Detalhes: '+errors.slice(0,20).join(' | ');
+ $('importFeedback').textContent=message;
+ if(imported)toast(imported+' NF-e(s) importada(s)');
+}
+function table(headers,rows,empty){if(!rows.length)return '<div class="empty"><div class="empty-icon">▤</div><strong>'+empty+'</strong><span>Importe arquivos XML para começar.</span></div>';return '<div class="table-wrap"><table><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>'}
 function invoiceRows(items){return items.map(n=>'<tr><td><span class="strong">NF '+esc(n.number||'—')+'</span><div class="muted">Série '+esc(n.series||'—')+'</div></td><td><span class="strong">'+esc(n.supplier)+'</span><div class="muted">'+esc(n.supplierCnpj)+'</div></td><td>'+esc(formatDate(n.date))+'</td><td class="strong">'+money(n.total)+'</td><td><span class="pill green">● '+esc(n.status)+'</span></td><td><button class="btn" data-detail="'+esc(n.id??n.key)+'">Detalhes</button></td></tr>')}
 function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function formatDate(s){if(!s)return'—';const d=new Date(s);return isNaN(d)?s:d.toLocaleDateString('pt-BR')}
 function render(){const inv=state.invoices,prods=inv.flatMap(n=>n.products.map(p=>({...p,supplier:n.supplier,number:n.number})));$('statInvoices').textContent=inv.length;$('statValue').textContent=money(inv.reduce((a,n)=>a+Number(n.total||0),0));$('statSuppliers').textContent=new Set(inv.map(n=>n.supplierCnpj||n.supplier)).size;$('statProducts').textContent=prods.length;$('recentTable').innerHTML=table(['Nota','Fornecedor','Emissão','Valor total','Situação',''],invoiceRows(inv.slice(-5).reverse()),'Nenhuma nota importada');let search=($('invoiceSearch')?.value||'').toLowerCase(),date=$('dateFilter')?.value||'';let filtered=inv.filter(n=>([n.number,n.supplier,n.supplierCnpj].join(' ').toLowerCase().includes(search))&&(!date||String(n.date||'').slice(0,10)===date));$('invoiceTable').innerHTML=table(['Nota','Fornecedor','Emissão','Valor total','Situação',''],invoiceRows(filtered.slice().reverse()),'Nenhuma nota encontrada');let ps=($('productSearch')?.value||'').toLowerCase();$('productsTable').innerHTML=table(['Código','Descrição','Fornecedor','Qtd.','Unidade','Valor total'],prods.filter(p=>(p.description+' '+p.code+' '+p.supplier).toLowerCase().includes(ps)).map(p=>'<tr><td>'+esc(p.code)+'</td><td class="strong">'+esc(p.description)+'</td><td>'+esc(p.supplier)+'</td><td>'+Number(p.quantity||0).toLocaleString('pt-BR')+'</td><td>'+esc(p.unit)+'</td><td class="strong">'+money(p.total)+'</td></tr>'),'Nenhum produto identificado');const suppliers=[...new Map(inv.map(n=>[n.supplierCnpj||n.supplier,n])).values()];$('suppliersTable').innerHTML=table(['Fornecedor','CNPJ/CPF','Notas importadas','Total'],suppliers.map(s=>{const ns=inv.filter(n=>(n.supplierCnpj||n.supplier)===(s.supplierCnpj||s.supplier));return '<tr><td class="strong">'+esc(s.supplier)+'</td><td>'+esc(s.supplierCnpj)+'</td><td>'+ns.length+'</td><td class="strong">'+money(ns.reduce((a,n)=>a+Number(n.total||0),0))+'</td></tr>'}),'Nenhum fornecedor identificado')}
 function toast(msg){$('toast').textContent=msg;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2800)}
-function navigate(page){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+page));document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('crumb').textContent=({overview:'Visão geral',invoices:'Notas fiscais',products:'Produtos',suppliers:'Fornecedores',import:'Importar XML',settings:'Configurações'})[page]||page;$('sidebar').classList.remove('open');render()}
+function navigate(page){document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id==='page-'+page));document.querySelectorAll('[data-page]').forEach(b=>b.classList.toggle('active',b.dataset.page===page));$('crumb').textContent=({overview:'Visão geral',invoices:'Notas fiscais',products:'Produtos',suppliers:'Fornecedores',import:'Importar XML',history:'Histórico / recuperação',settings:'Configurações'})[page]||page;$('sidebar').classList.remove('open');render()}
 document.querySelectorAll('[data-page]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.page)));document.querySelectorAll('[data-goto]').forEach(b=>b.addEventListener('click',()=>navigate(b.dataset.goto)));$('menuBtn').addEventListener('click',()=>$('sidebar').classList.toggle('open'));$('xmlFiles').addEventListener('change',e=>importFiles(e.target.files));$('drop').addEventListener('click',e=>{if(e.target.tagName!=='INPUT')$('xmlFiles').click()});['dragenter','dragover'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();$('drop').classList.add('drag')}));['dragleave','drop'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();$('drop').classList.remove('drag')}));$('drop').addEventListener('drop',e=>importFiles(e.dataTransfer.files));$('invoiceSearch').addEventListener('input',render);$('dateFilter').addEventListener('change',render);$('productSearch').addEventListener('input',render);document.addEventListener('click',e=>{const b=e.target.closest('[data-detail]');if(!b)return;const n=state.invoices.find(x=>String(x.id??x.key)===b.dataset.detail);if(n)showDetail(n)});function showDetail(n){const rows=n.products.map(p=>'<tr><td>'+esc(p.code)+'</td><td>'+esc(p.description)+'</td><td>'+p.quantity.toLocaleString('pt-BR')+' '+esc(p.unit)+'</td><td>'+money(p.unitPrice)+'</td><td>'+money(p.total)+'</td></tr>').join('');const w=window.open('','_blank','width=900,height=750');if(!w){toast('Permita pop-ups para abrir os detalhes');return}w.document.write('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>NF '+esc(n.number)+'</title><body style="font:14px Arial;padding:28px;color:#252a31"><h2 style="color:#a71920">Detalhes da NF-e '+esc(n.number)+'</h2><p><b>Fornecedor:</b> '+esc(n.supplier)+' · '+esc(n.supplierCnpj)+'</p><p><b>Destinatário CNPJ:</b> '+esc(n.destCnpj)+'</p><p><b>Emissão:</b> '+esc(formatDate(n.date))+' · <b>Série:</b> '+esc(n.series)+'</p><p><b>Chave:</b> '+esc(n.key)+'</p><p><b>Pagamento informado:</b> '+esc(n.payment)+'</p><h3>Produtos</h3><table width="100%" border="1" cellspacing="0" cellpadding="8"><tr><th>Código</th><th>Descrição</th><th>Quantidade</th><th>Unitário</th><th>Total</th></tr>'+rows+'</table><h2>Total: '+money(n.total)+'</h2><p style="color:#777">Dados extraídos do XML · Central de Notas Fiscais Costalog</p></body></html>');w.document.close()}
 
 async function apiRequest(path,options={}){
