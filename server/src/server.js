@@ -20,7 +20,7 @@ const pool = DATABASE_URL ? new Pool({
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors()); // API pública nesta etapa, sem restrição de origem.
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({ limit: '30mb' }));
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 300,
@@ -73,6 +73,7 @@ async function initializeDatabase() {
   }
   await pool.query("CREATE TABLE IF NOT EXISTS suppliers (id BIGSERIAL PRIMARY KEY, identity_key TEXT NOT NULL UNIQUE, document TEXT, name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
   await pool.query("CREATE TABLE IF NOT EXISTS invoices (id BIGSERIAL PRIMARY KEY, access_key VARCHAR(44) UNIQUE, invoice_number TEXT, series TEXT, issue_date TIMESTAMPTZ, supplier_id BIGINT REFERENCES suppliers(id), supplier_name TEXT NOT NULL, supplier_document TEXT, recipient_document TEXT, total NUMERIC(15,2) NOT NULL DEFAULT 0, payment_info TEXT, protocol TEXT, status TEXT, file_name TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+  await pool.query('ALTER TABLE invoices ADD COLUMN IF NOT EXISTS raw_xml TEXT');
   await pool.query("CREATE TABLE IF NOT EXISTS invoice_products (id BIGSERIAL PRIMARY KEY, invoice_id BIGINT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE, item_number INTEGER NOT NULL, product_code TEXT, description TEXT, ncm TEXT, cfop TEXT, unit TEXT, quantity NUMERIC(18,6) NOT NULL DEFAULT 0, unit_price NUMERIC(18,6) NOT NULL DEFAULT 0, total NUMERIC(15,2) NOT NULL DEFAULT 0)");
   await pool.query("CREATE TABLE IF NOT EXISTS fiscal_documents (id BIGSERIAL PRIMARY KEY, document_type TEXT NOT NULL, document_key TEXT NOT NULL UNIQUE, document_number TEXT, series TEXT, issue_date TIMESTAMPTZ, issuer_name TEXT, issuer_document TEXT, recipient_name TEXT, recipient_document TEXT, total NUMERIC(15,2) NOT NULL DEFAULT 0, status TEXT, source TEXT NOT NULL DEFAULT 'XML/ZIP', file_name TEXT, raw_xml TEXT NOT NULL, details JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_fiscal_documents_type_date ON fiscal_documents(document_type,issue_date DESC)");
@@ -168,11 +169,24 @@ app.get('/api/invoices/export.csv', requireDatabase, requireAdminAuth, async (re
 
 app.get('/api/invoices', requireDatabase, requireAdminAuth, async (req, res, next) => {
   try {
-    const result = await pool.query("SELECT i.id, COALESCE(i.access_key, 'Não informada') AS key, i.access_key AS \"accessKey\", i.invoice_number AS number, i.series, i.issue_date AS date, i.supplier_name AS supplier, i.supplier_document AS \"supplierCnpj\", i.recipient_document AS \"destCnpj\", i.total, i.payment_info AS payment, i.protocol, i.status, i.source, i.file_name AS \"fileName\", COALESCE((SELECT json_agg(json_build_object('code',p.product_code,'description',p.description,'ncm',p.ncm,'cfop',p.cfop,'unit',p.unit,'quantity',p.quantity,'unitPrice',p.unit_price,'total',p.total) ORDER BY p.item_number) FROM invoice_products p WHERE p.invoice_id=i.id), '[]'::json) AS products FROM invoices i ORDER BY i.issue_date DESC NULLS LAST, i.id DESC LIMIT 1000");
+    const result = await pool.query("SELECT i.id, COALESCE(i.access_key, 'Não informada') AS key, i.access_key AS \"accessKey\", i.invoice_number AS number, i.series, i.issue_date AS date, i.supplier_name AS supplier, i.supplier_document AS \"supplierCnpj\", i.recipient_document AS \"destCnpj\", i.total, i.payment_info AS payment, i.protocol, i.status, i.source, i.file_name AS \"fileName\", (i.raw_xml IS NOT NULL) AS \"hasRawXml\", COALESCE((SELECT json_agg(json_build_object('code',p.product_code,'description',p.description,'ncm',p.ncm,'cfop',p.cfop,'unit',p.unit,'quantity',p.quantity,'unitPrice',p.unit_price,'total',p.total) ORDER BY p.item_number) FROM invoice_products p WHERE p.invoice_id=i.id), '[]'::json) AS products FROM invoices i ORDER BY i.issue_date DESC NULLS LAST, i.id DESC LIMIT 1000");
     res.json(result.rows);
   } catch (error) { next(error); }
 });
 
+app.get('/api/invoices/:id/xml', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'NF-e inválida.' });
+    const result = await pool.query('SELECT invoice_number,raw_xml FROM invoices WHERE id=$1', [id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'NF-e não encontrada.' });
+    if (!result.rows[0].raw_xml) return res.status(404).json({ error: 'XML original não armazenado. Para notas antigas, reimporte o XML original para habilitar o download.' });
+    const filename = 'NFe-' + String(result.rows[0].invoice_number || id).replace(/[^0-9A-Za-z_-]/g, '') + '.xml';
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
+    res.send(result.rows[0].raw_xml);
+  } catch (error) { next(error); }
+});
 app.get('/api/suppliers', requireDatabase, requireAdminAuth, async (req, res, next) => {
   try {
     const result = await pool.query("SELECT s.id,s.name,s.document,COUNT(i.id)::int AS invoice_count,COALESCE(SUM(i.total),0)::numeric(15,2) AS total_value FROM suppliers s LEFT JOIN invoices i ON i.supplier_id=s.id GROUP BY s.id ORDER BY s.name");
@@ -237,6 +251,7 @@ app.post('/api/invoices/import-batch', requireDatabase, requireAdminAuth, async 
       if (!/^\d{44}$/.test(key)) reason = 'Chave de acesso ausente ou inválida (44 dígitos obrigatórios).';
       else if (!supplierName) reason = 'Fornecedor não identificado.';
       else if (!Number.isFinite(total) || total < 0) reason = 'Valor total inválido.';
+      else if (String(data.rawXml || '').length > 10 * 1024 * 1024) reason = 'XML original acima de 10 MB.';
       else if (products.length > 500) reason = 'A NF-e excede o limite de 500 itens.';
       else if (issueDate && Number.isNaN(issueDate.getTime())) reason = 'Data de emissão inválida.';
       if (reason) {
@@ -253,8 +268,8 @@ app.post('/api/invoices/import-batch', requireDatabase, requireAdminAuth, async 
           [identityKey, supplierDocument, supplierName]
         );
         const inserted = await client.query(
-          "INSERT INTO invoices (access_key,invoice_number,series,issue_date,supplier_id,supplier_name,supplier_document,recipient_document,total,payment_info,protocol,status,file_name,source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'XML/ZIP') ON CONFLICT (access_key) DO NOTHING RETURNING id",
-          [key,String(data.number||''),String(data.series||''),issueDate,supplierResult.rows[0].id,supplierName,supplierDocument,cleanDocument(data.destCnpj),total,String(data.payment||''),String(data.protocol||''),String(data.status||'Importada por XML'),String(data.fileName||'')]
+          "INSERT INTO invoices (access_key,invoice_number,series,issue_date,supplier_id,supplier_name,supplier_document,recipient_document,total,payment_info,protocol,status,file_name,source,raw_xml) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'XML/ZIP',$14) ON CONFLICT (access_key) DO NOTHING RETURNING id",
+          [key,String(data.number||''),String(data.series||''),issueDate,supplierResult.rows[0].id,supplierName,supplierDocument,cleanDocument(data.destCnpj),total,String(data.payment||''),String(data.protocol||''),String(data.status||'Importada por XML'),String(data.fileName||''),String(data.rawXml||'')||null]
         );
         if (!inserted.rows.length) {
           await client.query('ROLLBACK TO SAVEPOINT invoice_import_item');
@@ -306,11 +321,11 @@ app.post('/api/invoices', requireDatabase, requireAdminAuth, async (req, res, ne
   try {
     await client.query('BEGIN');
     const supplierResult = await client.query("INSERT INTO suppliers (identity_key,document,name) VALUES ($1,$2,$3) ON CONFLICT (identity_key) DO UPDATE SET document=EXCLUDED.document,name=EXCLUDED.name,updated_at=NOW() RETURNING id", [identityKey, supplierDocument, supplierName]);
-    const inserted = await client.query("INSERT INTO invoices (access_key,invoice_number,series,issue_date,supplier_id,supplier_name,supplier_document,recipient_document,total,payment_info,protocol,status,file_name) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (access_key) DO NOTHING RETURNING id", [
+    const inserted = await client.query("INSERT INTO invoices (access_key,invoice_number,series,issue_date,supplier_id,supplier_name,supplier_document,recipient_document,total,payment_info,protocol,status,file_name,raw_xml) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT (access_key) DO NOTHING RETURNING id", [
       accessKey, String(data.number || ''), String(data.series || ''), issueDate,
       supplierResult.rows[0].id, supplierName, supplierDocument,
       cleanDocument(data.destCnpj), total, String(data.payment || ''),
-      String(data.protocol || ''), String(data.status || 'Importada'), String(data.fileName || '')
+      String(data.protocol || ''), String(data.status || 'Importada'), String(data.fileName || ''), String(data.rawXml || '') || null
     ]);
     if (!inserted.rows.length) {
       await client.query('ROLLBACK');
