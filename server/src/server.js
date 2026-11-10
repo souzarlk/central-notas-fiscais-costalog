@@ -20,7 +20,7 @@ const pool = DATABASE_URL ? new Pool({
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors()); // API pública nesta etapa, sem restrição de origem.
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '20mb' }));
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 300,
@@ -79,6 +79,8 @@ async function initializeDatabase() {
   await pool.query("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sefaz_schema TEXT");
   await pool.query("CREATE TABLE IF NOT EXISTS sefaz_sync_state (cnpj VARCHAR(14) PRIMARY KEY, ult_nsu VARCHAR(15) NOT NULL DEFAULT '000000000000000', max_nsu VARCHAR(15) NOT NULL DEFAULT '000000000000000', last_status TEXT, last_message TEXT, last_sync_at TIMESTAMPTZ, next_sync_at TIMESTAMPTZ, documents_processed INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
   await pool.query("CREATE TABLE IF NOT EXISTS sefaz_processed_documents (nsu VARCHAR(32) PRIMARY KEY, schema TEXT NOT NULL, access_key VARCHAR(44), document_type TEXT NOT NULL, processing_status TEXT NOT NULL, details JSONB NOT NULL DEFAULT '{}'::jsonb, received_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+  await pool.query("CREATE TABLE IF NOT EXISTS sefaz_key_lookups (id BIGSERIAL PRIMARY KEY, access_key VARCHAR(44) NOT NULL, result_status TEXT NOT NULL, queried_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_sefaz_key_lookups_queried_at ON sefaz_key_lookups(queried_at DESC)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_sefaz_documents_access_key ON sefaz_processed_documents(access_key)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_invoices_issue_date ON invoices(issue_date DESC)");
   await pool.query("CREATE INDEX IF NOT EXISTS idx_invoices_supplier_document ON invoices(supplier_document)");
@@ -131,6 +133,25 @@ app.get('/health', async (req, res) => {
     }
   }
   res.json({ status: 'ok', databaseConfigured: Boolean(pool), databaseConnected, authentication: auth.getAuthConfig().configured ? 'enabled' : 'not_configured' });
+});
+
+app.get('/api/invoices/export.csv', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  try {
+    const result = await pool.query("SELECT invoice_number,series,issue_date,supplier_name,supplier_document,recipient_document,total,status,source,access_key FROM invoices ORDER BY issue_date DESC NULLS LAST,id DESC");
+    const fields = ['Número','Série','Data de emissão','Fornecedor','CNPJ fornecedor','CNPJ destinatário','Valor total','Situação','Origem','Chave de acesso'];
+    const cell = value => {
+      let text = String(value ?? '');
+      if (/^[=+@-]/.test(text)) text = "'" + text;
+      return '"' + text.replace(/"/g, '""') + '"';
+    };
+    const lines = [fields.map(cell).join(';'), ...result.rows.map(row => [
+      row.invoice_number,row.series,row.issue_date ? new Date(row.issue_date).toISOString() : '',
+      row.supplier_name,row.supplier_document,row.recipient_document,row.total,row.status,row.source,row.access_key
+    ].map(cell).join(';'))];
+    res.setHeader('Content-Type','text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition','attachment; filename="costalog-notas-fiscais.csv"');
+    res.send('\uFEFF' + lines.join('\r\n'));
+  } catch (error) { next(error); }
 });
 
 app.get('/api/invoices', requireDatabase, requireAdminAuth, async (req, res, next) => {
