@@ -74,6 +74,16 @@ async function initializeDatabase() {
   await pool.query("CREATE TABLE IF NOT EXISTS suppliers (id BIGSERIAL PRIMARY KEY, identity_key TEXT NOT NULL UNIQUE, document TEXT, name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
   await pool.query("CREATE TABLE IF NOT EXISTS invoices (id BIGSERIAL PRIMARY KEY, access_key VARCHAR(44) UNIQUE, invoice_number TEXT, series TEXT, issue_date TIMESTAMPTZ, supplier_id BIGINT REFERENCES suppliers(id), supplier_name TEXT NOT NULL, supplier_document TEXT, recipient_document TEXT, total NUMERIC(15,2) NOT NULL DEFAULT 0, payment_info TEXT, protocol TEXT, status TEXT, file_name TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
   await pool.query("CREATE TABLE IF NOT EXISTS invoice_products (id BIGSERIAL PRIMARY KEY, invoice_id BIGINT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE, item_number INTEGER NOT NULL, product_code TEXT, description TEXT, ncm TEXT, cfop TEXT, unit TEXT, quantity NUMERIC(18,6) NOT NULL DEFAULT 0, unit_price NUMERIC(18,6) NOT NULL DEFAULT 0, total NUMERIC(15,2) NOT NULL DEFAULT 0)");
+  await pool.query("CREATE TABLE IF NOT EXISTS fiscal_documents (id BIGSERIAL PRIMARY KEY, document_type TEXT NOT NULL, document_key TEXT NOT NULL UNIQUE, document_number TEXT, series TEXT, issue_date TIMESTAMPTZ, issuer_name TEXT, issuer_document TEXT, recipient_name TEXT, recipient_document TEXT, total NUMERIC(15,2) NOT NULL DEFAULT 0, status TEXT, source TEXT NOT NULL DEFAULT 'XML/ZIP', file_name TEXT, raw_xml TEXT NOT NULL, details JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_fiscal_documents_type_date ON fiscal_documents(document_type,issue_date DESC)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_fiscal_documents_issuer ON fiscal_documents(issuer_document)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_fiscal_documents_recipient ON fiscal_documents(recipient_document)");
+  await pool.query("CREATE TABLE IF NOT EXISTS workspace_records (id BIGSERIAL PRIMARY KEY, area TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'Em aberto', supplier_name TEXT, supplier_document TEXT, amount NUMERIC(15,2), due_date DATE, related_invoice_id BIGINT REFERENCES invoices(id) ON DELETE SET NULL, payload JSONB NOT NULL DEFAULT '{}'::jsonb, created_by TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_workspace_records_area_kind ON workspace_records(area,kind,updated_at DESC)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_workspace_records_due ON workspace_records(due_date)");
+  await pool.query("CREATE TABLE IF NOT EXISTS document_annotations (id BIGSERIAL PRIMARY KEY, entity_type TEXT NOT NULL, entity_id BIGINT NOT NULL, kind TEXT NOT NULL DEFAULT 'comment', body TEXT NOT NULL, color TEXT, created_by TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_document_annotations_entity ON document_annotations(entity_type,entity_id,created_at DESC)");
+
   await pool.query("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'");
   await pool.query("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sefaz_nsu VARCHAR(15)");
   await pool.query("ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sefaz_schema TEXT");
@@ -327,6 +337,212 @@ app.post('/api/invoices', requireDatabase, requireAdminAuth, async (req, res, ne
   } finally {
     client.release();
   }
+});
+
+
+const WORKSPACE_AREAS = new Set(['geral','compras','fiscal']);
+const WORKSPACE_KINDS = new Set([
+  'payable','bill','purchase_order','negotiation','automation','supplier_profile',
+  'document_stage','report_template','library_item','tax_review','reconciliation'
+]);
+const FISCAL_DOCUMENT_TYPES = new Set(['NFSE','CTE','CFE_SAT','NFCE','MDFE','CTE_OS','OTHER']);
+
+app.get('/api/fiscal-documents', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  try {
+    const type = String(req.query.type || '').toUpperCase();
+    const result = await pool.query(
+      "SELECT id,document_type AS type,document_key AS key,document_number AS number,series,issue_date AS date,issuer_name AS issuer,issuer_document AS issuer_document,recipient_name AS recipient,recipient_document AS recipient_document,total,status,source,file_name AS file_name,created_at FROM fiscal_documents WHERE ($1='' OR document_type=$1) ORDER BY issue_date DESC NULLS LAST,id DESC LIMIT 2000",
+      [type]
+    );
+    res.json(result.rows);
+  } catch (error) { next(error); }
+});
+
+app.post('/api/fiscal-documents/import-batch', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  const documents = Array.isArray(req.body?.documents) ? req.body.documents : [];
+  if (!documents.length) return res.status(400).json({ error: 'Nenhum documento foi enviado para importação.' });
+  if (documents.length > 50) return res.status(400).json({ error: 'Importe no máximo 50 documentos por lote.' });
+  const summary = { received: documents.length, imported: 0, duplicates: 0, invalid: 0, errors: [] };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (let index = 0; index < documents.length; index++) {
+      const item = documents[index] || {};
+      const type = String(item.type || '').toUpperCase();
+      const rawXml = String(item.rawXml || '');
+      const fileName = String(item.fileName || 'documento-' + (index + 1) + '.xml').slice(0, 240);
+      let reason = '';
+      if (!FISCAL_DOCUMENT_TYPES.has(type)) reason = 'Tipo de documento não habilitado para esta importação.';
+      else if (!rawXml || rawXml.length > 10 * 1024 * 1024) reason = 'XML ausente ou acima de 10 MB.';
+      else if (!String(item.number || '').trim()) reason = 'Número do documento não identificado.';
+      const total = Number(item.total || 0);
+      const issueDate = item.date ? new Date(item.date) : null;
+      if (!reason && (!Number.isFinite(total) || total < 0)) reason = 'Valor total inválido.';
+      if (!reason && issueDate && Number.isNaN(issueDate.getTime())) reason = 'Data de emissão inválida.';
+      if (reason) {
+        summary.invalid++;
+        summary.errors.push({ fileName, reason });
+        continue;
+      }
+      const suppliedKey = String(item.key || '').trim().slice(0, 120);
+      const documentKey = suppliedKey || crypto.createHash('sha256').update(rawXml).digest('hex');
+      const inserted = await client.query(
+        "INSERT INTO fiscal_documents (document_type,document_key,document_number,series,issue_date,issuer_name,issuer_document,recipient_name,recipient_document,total,status,source,file_name,raw_xml,details) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'XML/ZIP',$12,$13,$14::jsonb) ON CONFLICT (document_key) DO NOTHING RETURNING id",
+        [type,documentKey,String(item.number || '').slice(0,100),String(item.series || '').slice(0,40),issueDate,String(item.issuer || '').slice(0,240),cleanDocument(item.issuerDocument),String(item.recipient || '').slice(0,240),cleanDocument(item.recipientDocument),total,String(item.status || 'Importado').slice(0,80),fileName,rawXml,JSON.stringify(item.details || {})]
+      );
+      if (inserted.rows.length) summary.imported++;
+      else summary.duplicates++;
+    }
+    await client.query('COMMIT');
+    res.json(summary);
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    next(error);
+  } finally { client.release(); }
+});
+
+app.get('/api/fiscal-documents/:id/xml', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Documento inválido.' });
+    const result = await pool.query('SELECT file_name,raw_xml FROM fiscal_documents WHERE id=$1', [id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'XML não encontrado.' });
+    const filename = String(result.rows[0].file_name || 'documento.xml').replace(/[^a-zA-Z0-9._-]/g, '_');
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + filename + '"');
+    res.send(result.rows[0].raw_xml);
+  } catch (error) { next(error); }
+});
+
+app.get('/api/workspace/records', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  try {
+    const area = String(req.query.area || '');
+    const kind = String(req.query.kind || '');
+    if (area && !WORKSPACE_AREAS.has(area)) return res.status(400).json({ error: 'Área inválida.' });
+    if (kind && !WORKSPACE_KINDS.has(kind)) return res.status(400).json({ error: 'Tipo de registro inválido.' });
+    const result = await pool.query(
+      "SELECT id,area,kind,title,status,supplier_name AS supplier,supplier_document AS supplier_document,amount,due_date AS due_date,related_invoice_id AS related_invoice_id,payload,created_by,created_at,updated_at FROM workspace_records WHERE ($1='' OR area=$1) AND ($2='' OR kind=$2) ORDER BY updated_at DESC,id DESC LIMIT 2000",
+      [area,kind]
+    );
+    res.json(result.rows);
+  } catch (error) { next(error); }
+});
+
+app.post('/api/workspace/records', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  const data = req.body || {};
+  const area = String(data.area || '');
+  const kind = String(data.kind || '');
+  const title = String(data.title || '').trim();
+  if (!WORKSPACE_AREAS.has(area)) return res.status(400).json({ error: 'Área inválida.' });
+  if (!WORKSPACE_KINDS.has(kind)) return res.status(400).json({ error: 'Tipo de registro inválido.' });
+  if (!title || title.length > 240) return res.status(400).json({ error: 'Informe um título com até 240 caracteres.' });
+  const amount = data.amount == null || data.amount === '' ? null : Number(data.amount);
+  if (amount !== null && (!Number.isFinite(amount) || amount < 0)) return res.status(400).json({ error: 'Valor inválido.' });
+  const dueDate = data.dueDate ? String(data.dueDate) : null;
+  if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return res.status(400).json({ error: 'Data inválida.' });
+  const relatedInvoiceId = data.relatedInvoiceId ? Number(data.relatedInvoiceId) : null;
+  if (relatedInvoiceId && (!Number.isSafeInteger(relatedInvoiceId) || relatedInvoiceId <= 0)) return res.status(400).json({ error: 'Nota vinculada inválida.' });
+  try {
+    const result = await pool.query(
+      "INSERT INTO workspace_records (area,kind,title,status,supplier_name,supplier_document,amount,due_date,related_invoice_id,payload,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11) RETURNING id,area,kind,title,status,supplier_name AS supplier,supplier_document AS supplier_document,amount,due_date AS due_date,related_invoice_id AS related_invoice_id,payload,created_by,created_at,updated_at",
+      [area,kind,title,String(data.status || 'Em aberto').slice(0,80),String(data.supplier || '').slice(0,240),cleanDocument(data.supplierDocument),amount,dueDate,relatedInvoiceId,JSON.stringify(data.payload || {}),req.admin.username]
+    );
+    res.status(201).json({ record: result.rows[0] });
+  } catch (error) { next(error); }
+});
+
+app.patch('/api/workspace/records/:id', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Registro inválido.' });
+  const data = req.body || {};
+  const allowed = {
+    title: 'title', status: 'status', supplier: 'supplier_name',
+    supplierDocument: 'supplier_document', amount: 'amount', dueDate: 'due_date',
+    relatedInvoiceId: 'related_invoice_id', payload: 'payload'
+  };
+  const sets = [], values = [];
+  for (const [key,column] of Object.entries(allowed)) {
+    if (!Object.prototype.hasOwnProperty.call(data,key)) continue;
+    let value = data[key];
+    if (key === 'title') { value = String(value || '').trim(); if (!value || value.length > 240) return res.status(400).json({ error: 'Título inválido.' }); }
+    if (key === 'status' || key === 'supplier') value = String(value || '').slice(0,240);
+    if (key === 'supplierDocument') value = cleanDocument(value);
+    if (key === 'amount' && value !== null && value !== '') { value = Number(value); if (!Number.isFinite(value) || value < 0) return res.status(400).json({ error: 'Valor inválido.' }); }
+    if (key === 'dueDate' && value && !/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return res.status(400).json({ error: 'Data inválida.' });
+    if (key === 'relatedInvoiceId' && value) { value = Number(value); if (!Number.isSafeInteger(value) || value <= 0) return res.status(400).json({ error: 'Nota vinculada inválida.' }); }
+    if (key === 'payload') value = JSON.stringify(value || {});
+    values.push(value);
+    sets.push(column + '=
+  console.error(error);
+  if (res.headersSent) return next(error);
+  res.status(500).json({ error: 'Erro interno da API.' });
+});
+
+initializeDatabase()
+  .then(() => app.listen(PORT, '0.0.0.0', () => console.log('Costalog API ativa na porta ' + PORT)))
+  .catch(error => {
+    console.error('Falha ao preparar o banco de dados:', error);
+    process.exit(1);
+  });
+
+process.on('SIGTERM', async () => {
+  if (pool) await pool.end().catch(() => {});
+  process.exit(0);
+});
+ + values.length + (key === 'payload' ? '::jsonb' : ''));
+  }
+  if (!sets.length) return res.status(400).json({ error: 'Nenhum campo válido para atualizar.' });
+  values.push(id);
+  try {
+    const result = await pool.query("UPDATE workspace_records SET " + sets.join(',') + ",updated_at=NOW() WHERE id=$" + values.length + " RETURNING id,area,kind,title,status,supplier_name AS supplier,supplier_document AS supplier_document,amount,due_date AS due_date,related_invoice_id AS related_invoice_id,payload,created_by,created_at,updated_at", values);
+    if (!result.rows.length) return res.status(404).json({ error: 'Registro não encontrado.' });
+    res.json({ record: result.rows[0] });
+  } catch (error) { next(error); }
+});
+
+app.delete('/api/workspace/records/:id', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Registro inválido.' });
+  try {
+    const result = await pool.query('DELETE FROM workspace_records WHERE id=$1 RETURNING id', [id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Registro não encontrado.' });
+    res.json({ deleted: true, id });
+  } catch (error) { next(error); }
+});
+
+app.get('/api/annotations', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  try {
+    const entityType = String(req.query.entityType || '');
+    const entityId = Number(req.query.entityId || 0);
+    if (!['invoice','fiscal_document'].includes(entityType) || !Number.isSafeInteger(entityId) || entityId <= 0) return res.status(400).json({ error: 'Documento inválido.' });
+    const result = await pool.query('SELECT id,entity_type AS entity_type,entity_id AS entity_id,kind,body,color,created_by,created_at FROM document_annotations WHERE entity_type=$1 AND entity_id=$2 ORDER BY created_at DESC', [entityType,entityId]);
+    res.json(result.rows);
+  } catch (error) { next(error); }
+});
+
+app.post('/api/annotations', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  const data = req.body || {};
+  const entityType = String(data.entityType || '');
+  const entityId = Number(data.entityId || 0);
+  const kind = String(data.kind || 'comment');
+  const body = String(data.body || '').trim();
+  if (!['invoice','fiscal_document'].includes(entityType) || !Number.isSafeInteger(entityId) || entityId <= 0) return res.status(400).json({ error: 'Documento inválido.' });
+  if (!['comment','tag'].includes(kind)) return res.status(400).json({ error: 'Tipo de anotação inválido.' });
+  if (!body || body.length > 2000) return res.status(400).json({ error: 'Informe um texto com até 2.000 caracteres.' });
+  try {
+    const result = await pool.query('INSERT INTO document_annotations (entity_type,entity_id,kind,body,color,created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id,entity_type AS entity_type,entity_id AS entity_id,kind,body,color,created_by,created_at', [entityType,entityId,kind,body,String(data.color || '').slice(0,30),req.admin.username]);
+    res.status(201).json({ annotation: result.rows[0] });
+  } catch (error) { next(error); }
+});
+
+app.delete('/api/annotations/:id', requireDatabase, requireAdminAuth, async (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Anotação inválida.' });
+  try {
+    const result = await pool.query('DELETE FROM document_annotations WHERE id=$1 RETURNING id', [id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Anotação não encontrada.' });
+    res.json({ deleted: true });
+  } catch (error) { next(error); }
 });
 
 app.use((error, req, res, next) => {
